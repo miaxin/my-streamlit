@@ -1,34 +1,56 @@
-# app.py
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="CSV 上傳與顯示", layout="wide")
+st.title("汽車銷售資料分析")
 
-st.title("📁 公開資料集 CSV 上傳與顯示")
-
-# 上傳檔案
 uploaded_file = st.file_uploader("請上傳 CSV 檔案", type=["csv"])
 
 if uploaded_file is not None:
-    try:
-        # 嘗試自動偵測編碼（Big5 / UTF-8）
-        try:
-            df = pd.read_csv(uploaded_file, encoding='utf-8')
-        except UnicodeDecodeError:
-            df = pd.read_csv(uploaded_file, encoding='big5')
-
-        st.success("✅ 檔案上傳成功，總共 %d 筆資料。" % len(df))
-
-        # 顯示欄位選單
-        sort_col = st.selectbox("選擇要排序的欄位", df.columns)
-        sort_order = st.radio("排序方式", ["升冪", "降冪"], horizontal=True)
-
-        # 排序後的表格
-        df_sorted = df.sort_values(by=sort_col, ascending=(sort_order == "升冪"))
-
-        st.dataframe(df_sorted, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ 檔案處理失敗：{e}")
+    df = pd.read_csv(uploaded_file, encoding='utf-8', parse_dates=['Date'])
+    
+    st.subheader("📊 資料總攬")
+    st.write(f"資料總筆數: {len(df)}")
+    st.write(f"欄位名稱: {list(df.columns)}")
+    st.dataframe(df.head(10))  # 預覽前10筆資料
+    
+    st.write("---")
+    
+    analysis = st.selectbox("選擇分析類型", [
+        "銷售趨勢分析",
+        "經銷商銷售排行",
+        "品牌銷售排行",
+        "車款銷售排行",
+        "性別分析",
+        "經銷商區域分析",
+        "價格分布"
+    ])
+    
+    if analysis == "銷售趨勢分析":
+        sales_trend = df.groupby('Date')['Price ($)'].sum().sort_index()
+        st.line_chart(sales_trend)
+    
+    elif analysis == "經銷商銷售排行":
+        dealer_sales = df.groupby('Dealer_Name')['Price ($)'].sum()
+        st.bar_chart(dealer_sales)
+    
+    elif analysis == "品牌銷售排行":
+        brand_sales = df.groupby('Company')['Price ($)'].sum()
+        st.bar_chart(brand_sales)
+    
+    elif analysis == "車款銷售排行":
+        model_sales = df.groupby('Model')['Price ($)'].sum()
+        st.bar_chart(model_sales)
+    
+    elif analysis == "性別分析":
+        gender_sales = df.groupby('Gender')['Price ($)'].sum()
+        st.bar_chart(gender_sales)
+    
+    elif analysis == "經銷商區域分析":
+        region_sales = df.groupby('Dealer_Region')['Price ($)'].sum()
+        st.bar_chart(region_sales)
+    
+    elif analysis == "價格分布":
+        st.write("價格分布直方圖")
+        st.bar_chart(df['Price ($)'].value_counts(bins=20).sort_index())
 else:
-    st.info("請先上傳 .csv 檔案以繼續。")
+    st.info("請先上傳 CSV 檔案")
