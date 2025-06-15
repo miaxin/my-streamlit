@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
-st.set_page_config(page_title="銷售資料分析", layout="wide")
-st.title("銷售資料分析")
+st.set_page_config(page_title="汽車銷售資料分析", layout="wide")
+st.title("🚗 銷售資料分析儀表板")
 
 uploaded_file = st.file_uploader("請上傳 CSV 檔案", type=["csv"])
 
@@ -54,6 +54,7 @@ if uploaded_file is not None:
                 st.markdown("### 👥 車型偏好分析（依性別）")
                 pivot = filtered_df.pivot_table(index='Model', columns='Gender', values='Price ($)', aggfunc='sum').fillna(0)
                 st.bar_chart(pivot)
+                st.markdown("👫 顯示不同性別偏好的車型與消費結構。")
             else:
                 st.warning("資料缺少 Gender 或 Model 欄位")
 
@@ -64,7 +65,8 @@ if uploaded_file is not None:
                 alt.X("Price:Q", bin=alt.Bin(maxbins=20), title="價格區間"),
                 alt.Y('count():Q', title='數量')
             ).properties(width=800, height=400)
-            st.altair_chart(chart, use_container_width=True
+            st.altair_chart(chart, use_container_width=True)
+            st.markdown("📉 觀察各價格區間的熱門程度")
 
 else:
-    st.empty()  # 不顯示任何提示文字
+    st.empty()
