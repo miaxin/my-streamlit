@@ -1,71 +1,54 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="🚗 銷售資料分析儀表板", layout="wide")
+st.set_page_config(page_title="汽車銷售資料分析", layout="wide")
+st.title("🚗 銷售資料分析儀表板")
 
-# 頁面標題
-st.markdown(
-    "<h1 style='text-align: center; color: white; background-color: #4B6EA9; padding: 20px; border-radius: 10px;'>🚘 銷售資料分析儀表板</h1>",
-    unsafe_allow_html=True
-)
-
-# 上傳 CSV 檔案
-uploaded_file = st.file_uploader("📁 請上傳 CSV 檔案", type=["csv"])
+uploaded_file = st.file_uploader("請上傳 CSV 檔案", type=["csv"])
 
 if uploaded_file is not None:
-    # 讀取 CSV
     df = pd.read_csv(uploaded_file, encoding='utf-8', parse_dates=['Date'])
+    
+    # 資料清理與準備
+    df = df.dropna(subset=['Date', 'Price ($)'])
+    df['Year'] = df['Date'].dt.year
 
-    # 資料預覽區
-    with st.container():
-        st.markdown("### 🗂️ 資料總覽")
-        col1, col2 = st.columns(2)
-        col1.metric("📊 資料筆數", len(df))
-        col2.metric("🧾 欄位數", len(df.columns))
-        st.dataframe(df, use_container_width=True)
+    st.markdown("## 📊 資料總攬")
+    st.write(f"總筆數：{len(df)}")
+    st.write(f"欄位名稱：{list(df.columns)}")
+    st.dataframe(df, use_container_width=True)
 
+    st.divider()
+    st.markdown("## 🔍 分析類型")
 
-    st.markdown("---")
+    selected_year = st.selectbox("選擇年份篩選", sorted(df['Year'].unique(), reverse=True))
+    filtered_df = df[df['Year'] == selected_year]
 
-    # 分頁分析區
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📈 銷售趨勢", "🏪 經銷商排行", "🏷️ 品牌排行",
-        "🚗 車款排行", "🙋 性別分析", "🌍 區域分析", "💰 價格分布"
-    ])
+    col1, col2, col3 = st.columns(3)
+    col1.metric("平均單價", f"${filtered_df['Price ($)'].mean():,.0f}")
+    col2.metric("最高單價", f"${filtered_df['Price ($)'].max():,.0f}")
+    top_brand = filtered_df.groupby("Company")["Price ($)"].sum().idxmax()
+    col3.metric("銷售最佳品牌", top_brand)
 
-    with tab1:
-        st.subheader("📈 每日銷售趨勢")
-        trend = df.groupby('Date')['Price ($)'].sum().sort_index()
-        st.line_chart(trend)
+    st.markdown("### 📈 銷售趨勢圖（每日總銷售額）")
+    trend = filtered_df.groupby("Date")["Price ($)"].sum()
+    st.line_chart(trend)
 
-    with tab2:
-        st.subheader("🏪 經銷商總銷售額")
-        dealer = df.groupby('Dealer_Name')['Price ($)'].sum()
-        st.bar_chart(dealer)
+    st.markdown("### 🏆 Top 10 品牌銷售額")
+    top_brands = filtered_df.groupby("Company")["Price ($)"].sum().sort_values(ascending=False).head(10)
+    st.bar_chart(top_brands)
 
-    with tab3:
-        st.subheader("🏷️ 品牌總銷售額")
-        brand = df.groupby('Company')['Price ($)'].sum()
-        st.bar_chart(brand)
+    st.markdown("### 🏪 Top 10 經銷商銷售額")
+    top_dealers = filtered_df.groupby("Dealer_Name")["Price ($)"].sum().sort_values(ascending=False).head(10)
+    st.bar_chart(top_dealers)
 
-    with tab4:
-        st.subheader("🚗 車款總銷售額")
-        model = df.groupby('Model')['Price ($)'].sum()
-        st.bar_chart(model)
+    st.markdown("### 👥 車型偏好分析（依性別）")
+    if 'Gender' in df.columns and 'Model' in df.columns:
+        pivot = filtered_df.pivot_table(index='Model', columns='Gender', values='Price ($)', aggfunc='sum').fillna(0)
+        st.bar_chart(pivot)
 
-    with tab5:
-        st.subheader("🙋 不同性別銷售額")
-        gender = df.groupby('Gender')['Price ($)'].sum()
-        st.bar_chart(gender)
-
-    with tab6:
-        st.subheader("🌍 各區域總銷售額")
-        region = df.groupby('Dealer_Region')['Price ($)'].sum()
-        st.bar_chart(region)
-
-    with tab7:
-        st.subheader("💰 價格分布")
-        st.bar_chart(df['Price ($)'].value_counts(bins=20).sort_index())
+    st.markdown("### 💰 價格分布觀察")
+    st.bar_chart(filtered_df['Price ($)'].value_counts(bins=20).sort_index())
 
 else:
-    st.info("請先上傳資料以開始分析 🚀")
+    st.info("請先上傳包含汽車銷售欄位的 CSV 檔案，例如包含：Date, Price ($), Dealer_Name, Company, Model, Gender 等欄位。")
