@@ -22,8 +22,8 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         col1.metric("📊 資料筆數", len(df))
         col2.metric("🧾 欄位數", len(df.columns))
-        with st.expander("🔍 點此展開查看前10筆資料", expanded=True):
-            st.dataframe(df.head(10), use_container_width=True)
+        st.dataframe(df, use_container_width=True)
+
 
     st.markdown("---")
 
