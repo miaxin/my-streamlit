@@ -2,108 +2,152 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+from sklearn.preprocessing import MinMaxScaler
+from statsmodels.tsa.arima.model import ARIMA
 
-st.set_page_config(page_title="📊 全方位財務與商業分析儀表板", layout="wide")
-st.title("📈 商店與商品財務分析系統")
-
-uploaded_file = st.file_uploader("請上傳交易/財務資料 (CSV/XLSX)", type=["csv", "xlsx"])
-
-def load_data(file):
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
-    else:
-        df = pd.read_excel(file)
-    df.columns = df.columns.str.replace(r"（.*?）|\(.*?\)", "", regex=True).str.strip()
+# 讀取資料 (你要換成你自己的檔案路徑)
+@st.cache_data
+def load_data():
+    df = pd.read_csv("financial_data.csv")
     return df
 
-if uploaded_file:
-    df = load_data(uploaded_file)
-    st.markdown("## 🔍 資料預覽")
-    st.dataframe(df, use_container_width=True)
+df = load_data()
 
-    # 偵測常見欄位
-    col_map = {
-        '日期': 'Date', '交易日': 'Date', '銷售日': 'Date',
-        '公司': 'Company', '類別': 'Category',
-        '市值': 'MarketCap', '市值十億美元': 'MarketCap', '市值（十億美元）': 'MarketCap',
-        '收入': 'Revenue', '營收': 'Revenue', '營業收入': 'Revenue', 'Total Revenue': 'Revenue',
-        '收入十億美元': 'Revenue',
-        '毛利': 'GrossProfit',
-        '淨利': 'NetIncome', '純益': 'NetIncome', '收益': 'NetIncome', 'Profit After Tax': 'NetIncome',
-        '每股盈餘': 'EPS', '每股收益': 'EPS',
-        '息稅折舊攤提前利潤': 'EBITDA',
-        '股東權益': 'Equity',
-        '成本': 'Cost', '銷貨成本': 'Cost', '成本金額': 'Cost', 'COGS': 'Cost',
-        '數量': 'Quantity', '價格': 'Price',
-        '客戶': 'Customer',
-        '分店': 'Store', '門市': 'Store', '據點': 'Store', '營業點': 'Store',
-        '產品': 'Product', '商品': 'Product', '品項': 'Product', '品名': 'Product',
-        '年': 'Year', '年份': 'Year', '月份': 'Month'
-    }
-    df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
+st.title("上市公司年度財務分析（Altair & statsmodels版本）")
 
-    # 年份處理邏輯加強
-    if 'Year' not in df.columns:
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df['Year'] = df['Date'].dt.year
-            df['Month'] = df['Date'].dt.month
-        elif '年' in df.columns:
-            df['Year'] = pd.to_numeric(df['年'], errors='coerce')
+# 財務比率計算
+def calc_ratios(df):
+    df['NetProfitMargin'] = df['NetIncome'] / df['Revenue']
+    df['ROE'] = df['NetIncome'] / df['Equity']
+    df['ROA'] = df['NetIncome'] / (df['Equity'] + df['Debt'])
+    df['ROI'] = df['NetIncome'] / (df['Equity'] + df['Debt'])
+    df['DebtEquityRatio'] = df['Debt'] / df['Equity']
+    df['CurrentRatio'] = df['CurrentAssets'] / df['CurrentLiabilities']
+    df['GrossMargin'] = df['GrossProfit'] / df['Revenue']
+    df['OperatingMargin'] = (df['GrossProfit'] - (df['Revenue'] - df['GrossProfit'] - df['NetIncome'])) / df['Revenue']
+    return df
 
-    with st.sidebar:
-        st.header("⚙️ 選項")
-        year_options = df['Year'].dropna().unique() if 'Year' in df.columns else []
-        year = st.selectbox("選擇年份", sorted(year_options, reverse=True)) if len(year_options) > 0 else None
+df = calc_ratios(df)
 
-    filtered_df = df[df['Year'] == year] if year and 'Year' in df.columns else df.copy()
+companies = df['Company'].unique()
+selected_companies = st.sidebar.multiselect("選擇公司", companies, default=companies[:3])
 
-    st.markdown("## 📦 商品分析")
-    if all(col in filtered_df.columns for col in ['Product', 'Revenue']):
-        top_products = filtered_df.groupby('Product')['Revenue'].sum().nlargest(10).reset_index()
-        chart = alt.Chart(top_products).mark_bar().encode(
-            x=alt.X('Revenue:Q', title='營收'),
-            y=alt.Y('Product:N', sort='-x', title='商品')
-        ).properties(title=f"{year if year else ''} 年 Top 10 商品營收")
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        st.warning("缺少 Product 或 Revenue 欄位，無法進行商品分析")
+years = df['Year'].unique()
+year_min, year_max = int(df['Year'].min()), int(df['Year'].max())
+selected_years = st.sidebar.slider("選擇年份範圍", year_min, year_max, (year_min, year_max))
 
-    st.markdown("## 🏪 分店營運分析")
-    if all(col in filtered_df.columns for col in ['Store', 'Revenue']):
-        store_rev = filtered_df.groupby('Store')['Revenue'].sum().reset_index()
-        st.bar_chart(store_rev.set_index('Store'))
-    else:
-        st.warning("缺少 Store 或 Revenue 欄位，無法進行分店分析")
+filtered = df[(df['Company'].isin(selected_companies)) &
+              (df['Year'] >= selected_years[0]) & (df['Year'] <= selected_years[1])]
 
-    st.markdown("## 📈 財務趨勢預測")
-    if 'Date' in df.columns and 'Revenue' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        monthly = df.set_index('Date').resample('M').sum(numeric_only=True)
-        st.line_chart(monthly['Revenue'])
-    else:
-        st.warning("缺少 Date 或 Revenue 欄位，無法顯示趨勢")
+# 1. 財務趨勢折線圖
+st.header("財務趨勢分析")
+metric = st.selectbox("選擇指標", ['MarketCap', 'Revenue', 'GrossProfit', 'NetIncome', 'EPS'])
 
-    st.markdown("## 🧮 損益表")
-    if all(col in df.columns for col in ['Revenue', 'Cost']):
-        pnl = df.groupby('Year').agg({
-            'Revenue': 'sum',
-            'Cost': 'sum'
-        })
-        pnl['Gross Profit'] = pnl['Revenue'] - pnl['Cost']
-        pnl['Net Income'] = df.groupby('Year')['NetIncome'].sum() if 'NetIncome' in df.columns else pnl['Gross Profit'] * 0.8
-        st.dataframe(pnl)
-    else:
-        st.warning("缺少 Revenue 或 Cost 欄位，無法產生損益表")
+line_chart = alt.Chart(filtered).mark_line(point=True).encode(
+    x='Year:O',
+    y=alt.Y(metric, title=metric),
+    color='Company',
+    tooltip=['Company', 'Year', metric]
+).interactive()
 
-    st.markdown("## 📊 財務比率分析")
-    if all(col in df.columns for col in ['Revenue', 'GrossProfit', 'NetIncome']):
-        ratio = pd.DataFrame(index=df['Year'].dropna().unique())
-        ratio['毛利率'] = df.groupby('Year')['GrossProfit'].sum() / df.groupby('Year')['Revenue'].sum()
-        ratio['淨利率'] = df.groupby('Year')['NetIncome'].sum() / df.groupby('Year')['Revenue'].sum()
-        st.dataframe(ratio.style.format("{:.2%}"))
-    else:
-        st.warning("缺少 Revenue、GrossProfit 或 NetIncome 欄位，無法計算比率")
+st.altair_chart(line_chart, use_container_width=True)
 
+# 2. 財務比率柱狀圖
+st.header("財務比率分析")
+ratio = st.selectbox("選擇財務比率", ['NetProfitMargin', 'ROE', 'ROA', 'ROI', 'DebtEquityRatio', 'CurrentRatio'])
+
+bar_chart = alt.Chart(filtered).mark_bar().encode(
+    x='Year:O',
+    y=alt.Y(ratio, title=ratio),
+    color='Company',
+    column='Company',
+    tooltip=['Company', 'Year', ratio]
+).properties(width=100).interactive()
+
+st.altair_chart(bar_chart, use_container_width=True)
+
+# 3. 行業內多指標比較 — 用平行座標圖取代雷達圖
+st.header("行業內公司獲利與效率比較 (平行座標圖)")
+industry = st.selectbox("選擇行業", df['Industry'].unique())
+industry_df = df[(df['Industry'] == industry) & (df['Year'] == selected_years[1])]
+
+metrics = ['ROE', 'ROA', 'GrossMargin', 'OperatingMargin']
+
+# 標準化
+scaler = MinMaxScaler()
+scaled_vals = scaler.fit_transform(industry_df[metrics].fillna(0))
+scaled_df = pd.DataFrame(scaled_vals, columns=metrics)
+scaled_df['Company'] = industry_df['Company'].values
+
+# 將資料轉成長格式方便繪圖
+melted = scaled_df.melt(id_vars=['Company'], var_name='Metric', value_name='Value')
+
+parallel = alt.Chart(melted).mark_line().encode(
+    x=alt.X('Metric:N', sort=metrics),
+    y=alt.Y('Value:Q', scale=alt.Scale(domain=[0,1])),
+    color='Company',
+    detail='Company',
+    tooltip=['Company', 'Metric', alt.Tooltip('Value', format='.2f')]
+).interactive()
+
+st.altair_chart(parallel, use_container_width=True)
+
+# 4. 損益表模擬展示
+st.header("損益表與資產負債表模擬")
+company_sim = st.selectbox("選擇公司(模擬)", companies, key="sim_company")
+year_sim = st.slider("選擇年份(模擬)", year_min, year_max, year_min, key="sim_year")
+
+sim_row = df[(df['Company'] == company_sim) & (df['Year'] == year_sim)]
+if not sim_row.empty:
+    sim_data = sim_row.iloc[0]
+    st.markdown("**損益表（簡化）**")
+    st.write({
+        "營收 (Revenue)": sim_data['Revenue'],
+        "成本 (Cost, 簡化)": sim_data['Revenue'] - sim_data['GrossProfit'],
+        "淨利 (Net Income)": sim_data['NetIncome']
+    })
+
+    st.markdown("**資產負債表（簡化）**")
+    st.write({
+        "股東權益 (Equity)": sim_data['Equity'],
+        "負債 (Debt)": sim_data['Debt'],
+        "負債比 (Debt/Equity Ratio)": sim_data['DebtEquityRatio']
+    })
 else:
-    st.info("請上傳資料檔以開始分析。")
+    st.write("無該公司該年份資料")
+
+# 5. 簡單時間序列預測示範 — ARIMA
+st.header("簡單時間序列預測示範 (ARIMA)")
+
+predict_company = st.selectbox("選擇預測公司", companies, key="pred_company")
+predict_metric = st.selectbox("選擇預測指標", ['MarketCap', 'Revenue', 'NetIncome'], key="pred_metric")
+
+pred_df = df[df['Company'] == predict_company][['Year', predict_metric]].dropna().sort_values('Year')
+
+if len(pred_df) >= 5:
+    # ARIMA 只用指標值，年份作索引
+    pred_df = pred_df.set_index('Year')
+    try:
+        model = ARIMA(pred_df[predict_metric], order=(1,1,1))
+        model_fit = model.fit()
+        forecast = model_fit.forecast(steps=3)
+        
+        forecast_years = np.arange(pred_df.index.max()+1, pred_df.index.max()+4)
+        forecast_df = pd.DataFrame({predict_metric: forecast}, index=forecast_years).reset_index().rename(columns={'index':'Year'})
+
+        combined = pd.concat([pred_df.reset_index(), forecast_df])
+
+        line_pred = alt.Chart(combined).mark_line(point=True).encode(
+            x='Year:O',
+            y=predict_metric,
+            tooltip=['Year', predict_metric]
+        )
+
+        st.altair_chart(line_pred, use_container_width=True)
+        st.write("預測結果（未來3年）")
+        st.dataframe(forecast_df)
+
+    except Exception as e:
+        st.error(f"模型擬合失敗：{e}")
+else:
+    st.write("該公司資料不足，至少需要5年資料才能進行預測。")
