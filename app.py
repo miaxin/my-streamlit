@@ -7,6 +7,35 @@ st.title("🚗 銷售資料分析儀表板")
 
 uploaded_file = st.file_uploader("請上傳 CSV 檔案", type=["csv"])
 
+def detect_date_column(df):
+    for col in df.columns:
+        if 'date' in col.lower():
+            try:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+                if df[col].notna().sum() > 0:
+                    return col
+            except:
+                continue
+    for col in df.select_dtypes(include=['object', 'datetime']):
+        try:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            if df[col].notna().sum() > 0:
+                return col
+        except:
+            continue
+    return None
+
+def detect_price_column(df):
+    for col in df.columns:
+        if 'price' in col.lower():
+            if pd.api.types.is_numeric_dtype(df[col]):
+                return col
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        if df[col].mean() > 100:  # 假設價格通常不會太小
+            return col
+    return None
+
 if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
@@ -14,17 +43,17 @@ if uploaded_file is not None:
         st.error(f"讀取檔案錯誤：{e}")
         st.stop()
 
-    # 選擇日期與價格欄位
-    st.markdown("### 📌 請選擇資料欄位對應")
-    date_column = st.selectbox("選擇日期欄位", df.columns)
-    price_column = st.selectbox("選擇價格欄位", df.columns)
+    # 自動偵測欄位
+    date_col = detect_date_column(df)
+    price_col = detect_price_column(df)
 
-    # 嘗試轉換日期
-    df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
-    df = df.rename(columns={date_column: "Date", price_column: "Price ($)"})
+    if not date_col or not price_col:
+        st.error(f"無法自動偵測欄位：{'缺少日期欄位' if not date_col else ''} {'與' if not date_col and not price_col else ''} {'缺少價格欄位' if not price_col else ''}")
+        st.stop()
+
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df.rename(columns={date_col: "Date", price_col: "Price ($)"})
     df = df.dropna(subset=["Date", "Price ($)"])
-
-    # 加入年份欄位
     df["Year"] = df["Date"].dt.year
 
     st.markdown("## 📊 資料總覽")
@@ -86,5 +115,6 @@ if uploaded_file is not None:
         ).properties(width=800, height=400)
         st.altair_chart(chart, use_container_width=True)
         st.markdown("📉 觀察各價格區間的熱門程度")
+
 else:
-    st.empty()
+    st.info("請上傳 CSV 檔案以開始分析。")
