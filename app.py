@@ -5,15 +5,13 @@ import altair as alt
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.tsa.arima.model import ARIMA
 
-# 讀取資料 (你要換成你自己的檔案路徑)
-@st.cache_data
-def load_data():
-    df = pd.read_csv("financial_data.csv")
-    return df
-
-df = load_data()
-
-st.title("上市公司年度財務分析（Altair & statsmodels版本）")
+uploaded_file = st.file_uploader("上傳財務資料 CSV", type=['csv'])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    # 後續分析繼續
+else:
+    st.warning("請先上傳 CSV 檔")
+    st.stop()
 
 # 財務比率計算
 def calc_ratios(df):
