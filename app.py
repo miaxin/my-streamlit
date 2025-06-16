@@ -23,13 +23,22 @@ if uploaded_file:
 
     # 偵測常見欄位
     col_map = {
-        '日期': 'Date', '公司': 'Company', '類別': 'Category',
-        '市值': 'MarketCap', '市值十億美元': 'MarketCap',
-        '收入': 'Revenue', '收入十億美元': 'Revenue', '毛利': 'GrossProfit',
-        '淨利': 'NetIncome', '收益': 'NetIncome', '每股盈餘': 'EPS', '每股收益': 'EPS',
-        '息稅折舊攤提前利潤': 'EBITDA', '股東權益': 'Equity',
-        '成本': 'Cost', '數量': 'Quantity', '價格': 'Price', '客戶': 'Customer',
-        '分店': 'Store', '產品': 'Product', '商品': 'Product', '年': 'Year', '年份': 'Year', '月份': 'Month'
+        '日期': 'Date', '交易日': 'Date', '銷售日': 'Date',
+        '公司': 'Company', '類別': 'Category',
+        '市值': 'MarketCap', '市值十億美元': 'MarketCap', '市值（十億美元）': 'MarketCap',
+        '收入': 'Revenue', '營收': 'Revenue', '營業收入': 'Revenue', 'Total Revenue': 'Revenue',
+        '收入十億美元': 'Revenue',
+        '毛利': 'GrossProfit',
+        '淨利': 'NetIncome', '純益': 'NetIncome', '收益': 'NetIncome', 'Profit After Tax': 'NetIncome',
+        '每股盈餘': 'EPS', '每股收益': 'EPS',
+        '息稅折舊攤提前利潤': 'EBITDA',
+        '股東權益': 'Equity',
+        '成本': 'Cost', '銷貨成本': 'Cost', '成本金額': 'Cost', 'COGS': 'Cost',
+        '數量': 'Quantity', '價格': 'Price',
+        '客戶': 'Customer',
+        '分店': 'Store', '門市': 'Store', '據點': 'Store', '營業點': 'Store',
+        '產品': 'Product', '商品': 'Product', '品項': 'Product', '品名': 'Product',
+        '年': 'Year', '年份': 'Year', '月份': 'Month'
     }
     df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
 
