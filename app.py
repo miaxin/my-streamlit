@@ -1,49 +1,55 @@
 import streamlit as st
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 import plotly.express as px
 
-st.set_page_config(page_title="CSV 財務資料分析", layout="wide")
-st.title("📊 自動化資料分析平台")
-st.markdown("上傳一個 `csv` 檔案，系統會自動呈現資料分析。")
+st.set_page_config(page_title="財務報表分析儀表板", layout="wide")
+st.title("📈 財務報表視覺化分析平台")
+st.markdown("上傳一個 `csv` 財報資料，進行自動化視覺分析。")
 
-# 上傳 CSV
-uploaded_file = st.file_uploader("請上傳你的 CSV 檔案", type=["csv"])
+uploaded_file = st.file_uploader("📤 請上傳 CSV 財務報表", type=["csv"])
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    
-    st.subheader("🔍 資料預覽")
+
+    st.subheader("🔍 原始資料預覽")
     st.dataframe(df)
 
-    # 數值欄位
-    numeric_columns = df.select_dtypes(include=["float64", "int64"]).columns.tolist()
+    st.subheader("📌 基本財務指標卡片")
+    col1, col2, col3, col4 = st.columns(4)
+    if "總資產" in df.columns:
+        col1.metric("總資產", f"{df['總資產'].iloc[-1]:,.0f}")
+    if "總負債" in df.columns:
+        col2.metric("總負債", f"{df['總負債'].iloc[-1]:,.0f}")
+    if "股東權益" in df.columns:
+        col3.metric("股東權益", f"{df['股東權益'].iloc[-1]:,.0f}")
+    if "營業收入" in df.columns:
+        col4.metric("營業收入", f"{df['營業收入'].iloc[-1]:,.0f}")
 
-    # 基本統計
-    st.subheader("📊 敘述統計")
-    st.dataframe(df[numeric_columns].describe())
-
-    # 相關性熱圖
-    if len(numeric_columns) >= 2:
-        st.subheader("📌 數值欄位相關性熱圖")
-        corr = df[numeric_columns].corr()
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
-        st.pyplot(fig)
-
-    # 自動生成圖表（前 3 個欄位為例）
-    st.subheader("📈 散佈圖視覺化（前三組欄位）")
-    for i in range(min(3, len(numeric_columns)-1)):
-        fig = px.scatter(df, x=numeric_columns[i], y=numeric_columns[i+1],
-                         title=f"{numeric_columns[i]} vs {numeric_columns[i+1]}")
+    st.subheader("📊 資產結構分析（圓餅圖）")
+    asset_cols = [col for col in df.columns if "資產" in col and col != "總資產"]
+    if len(asset_cols) > 1:
+        asset_data = df[asset_cols].iloc[-1]
+        fig = px.pie(values=asset_data.values, names=asset_data.index, title="資產結構")
         st.plotly_chart(fig, use_container_width=True)
 
-    # 長條圖（單欄位分佈）
-    st.subheader("📊 數值欄位分佈（直方圖）")
-    for col in numeric_columns[:3]:
-        fig = px.histogram(df, x=col, nbins=30, title=f"{col} 分佈")
+    st.subheader("📊 負債結構分析（圓餅圖）")
+    debt_cols = [col for col in df.columns if "負債" in col and col != "總負債"]
+    if len(debt_cols) > 1:
+        debt_data = df[debt_cols].iloc[-1]
+        fig = px.pie(values=debt_data.values, names=debt_data.index, title="負債結構")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📈 資產與負債變化趨勢圖")
+    if "年度" in df.columns and "總資產" in df.columns and "總負債" in df.columns:
+        fig = px.line(df, x="年度", y=["總資產", "總負債", "股東權益"],
+                      markers=True, title="年度資產與負債趨勢")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📉 財務比率分析（長條圖）")
+    if "總資產" in df.columns and "總負債" in df.columns:
+        df["負債比率"] = df["總負債"] / df["總資產"] * 100
+        fig = px.bar(df, x="年度", y="負債比率", title="年度負債比率 (%)")
         st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("📁 請上傳一個 CSV 檔案以開始分析。")
+    st.info("⬆️ 請先上傳你的財務資料 CSV 檔案。")
