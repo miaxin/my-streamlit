@@ -15,7 +15,7 @@ genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 # Initialize Gemini Pro model
 # You can choose other models like 'gemini-pro-vision' for image-related tasks
 try:
-    gemini_model = genai.GenerativeModel('gemini-pro')
+    gemini_model = genai.GenerativeModel('gemini-2.5-flash')
 except Exception as e:
     st.error(f"Failed to initialize Gemini model: {e}")
     st.stop()
