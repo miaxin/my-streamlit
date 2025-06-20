@@ -1,6 +1,6 @@
-# pages/1_🤖_AI_聊天室.py
 import streamlit as st
 import google.generativeai as genai
+import pandas as pd
 import os
 
 # --- Gemini API Configuration ---
@@ -12,7 +12,7 @@ genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
 # 初始化 Gemini Pro 模型和聊天會話
 # 使用 st.cache_resource 來快取模型，避免每次頁面重新運行時都重新初始化
-@st.cache_resource(ttl="30min") 
+@st.cache_resource(ttl="30min")
 def get_gemini_model():
     try:
         return genai.GenerativeModel('gemini-2.5-flash')
@@ -23,12 +23,16 @@ def get_gemini_model():
 gemini_model = get_gemini_model()
 
 # 初始化聊天會話，並將歷史記錄儲存在 session_state 中
+# 這裡修改了初始化的 history，給予AI一個通用的角色提示
 if "chat" not in st.session_state:
-    st.session_state.chat = gemini_model.start_chat(history=[])
+    st.session_state.chat = gemini_model.start_chat(history=[
+        {"role": "user", "parts": ["你是一個多功能AI助手，可以回答各種主題的問題，不限於特定領域。"]},
+        {"role": "model", "parts": ["好的，我明白了。我會盡力回答您的各種問題。請問有什麼可以幫助您的嗎？"]}
+    ])
 
-st.title("💬 AI 財務聊天機器人")
+st.title("💬 AI 聊天機器人 (通用型)") # 修改標題，讓用戶知道這是通用型
 st.markdown("---")
-st.write("您好！我是您的 AI 財務分析助理。您可以問我任何關於財務分析、市場趨勢或您上傳數據中公司的問題。")
+st.write("您好！我是您的 AI 助理。您可以問我任何問題，不論是財務相關還是其他主題，我都會盡力為您提供幫助。")
 st.write("請輸入您的問題，我會盡力為您提供幫助。")
 
 # 顯示聊天歷史記錄
@@ -49,19 +53,17 @@ if user_query:
     with st.chat_message("assistant"):
         with st.spinner("AI 思考中..."):
             try:
-                # 嘗試將處理後的 DataFrame 傳遞給 AI，以提供上下文
-                # 注意：這是一個簡單的示例，實際應用中可能需要更複雜的數據傳遞機制
-                processed_df_str = ""
-                if 'processed_df' in st.session_state:
-                    # 考慮數據量，只傳遞部分數據或摘要
-                    df_summary = st.session_state['processed_df'].head().to_markdown(index=False)
-                    processed_df_str = f"\n\n以下是您上傳的數據摘要 (如果相關)：\n{df_summary}\n\n"
-                    # 也可以只傳遞當前選定公司的數據
-                    # if 'selected_company' in st.session_state and st.session_state.selected_company:
-                    #     company_data = st.session_state['processed_df'][st.session_state['processed_df']['Name'] == st.session_state.selected_company].iloc[0].to_dict()
-                    #     processed_df_str += f"\n當前選定的公司 {st.session_state.selected_company} 的數據：{company_data}\n"
-
-                full_prompt = f"{user_query}{processed_df_str}\n請用中文回答。"
+                # 準備財務數據上下文，但以更中立的方式傳遞
+                processed_df_context = ""
+                if 'processed_df' in st.session_state and not st.session_state['processed_df'].empty:
+                    df_summary = st.session_state['processed_df'].head(5).to_markdown(index=False)
+                    # 這裡將財務數據描述為「可參考的資訊」，而不是主要分析對象
+                    processed_df_context = f"\n\n[參考資訊：這裡有一份您上傳的財務數據摘要，如果我的問題與財務相關，請參考這些數據進行回答：\n{df_summary}\n]\n"
+                
+                # 組合最終傳給 AI 的提示詞
+                # 我們已經在 start_chat 時設定了通用角色，這裡只需傳遞用戶問題和可能的數據上下文
+                full_prompt = f"{user_query}{processed_df_context}\n請用繁體中文回答。"
+                
                 response = st.session_state.chat.send_message(full_prompt)
                 
                 if response and response.text:
