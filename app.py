@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 import google.generativeai as genai # Import Gemini library
+import os # <--- 新增: 用於讀取環境變數 (例如 GOOGLE_API_KEY)
 
 # --- Gemini API Configuration ---
 # Load API key from Streamlit secrets
@@ -22,7 +23,7 @@ except Exception as e:
 
 
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
-st.title("📊 財務分析儀表板與AI洞察")
+st.title("📊 企業財務洞察與AI輔助決策平台")
 st.markdown("---")
 st.markdown(""" **請上傳CSV 檔案**。 """)
 
@@ -675,7 +676,7 @@ if uploaded_file is not None:
 
         # --- Gemini AI Chat Section ---
         st.markdown("---")
-        st.header("🤖 AI 洞察分析 (Gemini)")
+        st.header("🤖 財務大數據，AI 為您解讀")
         st.info("您可以向 AI 提問關於上傳數據的問題，例如：\n- 『幫我分析一下銷售額和淨利潤的關係。』\n- 『市場市值最高的公司是哪家？它的主要財務指標是什麼？』\n- 『解釋一下流動比率的意義。』")
 
         user_query = st.text_input("💬 輸入您的問題：", key="gemini_query")
