@@ -89,7 +89,7 @@ if uploaded_file is not None:
         # 定義圖表需求 (基於欄位存在性)
         # ----------------------------------------------------
         chart_requirements = {
-            "產業市值長條圖（前 8 名 + 其他）": {
+            "產業市值長條圖（前 8 名）": { # 修改這裡的名稱，移除「+ 其他」
                 "required": {"Industry", "Market Capitalization"},
                 "description": "展示各產業的總市值分佈。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
             },
@@ -180,26 +180,20 @@ if uploaded_file is not None:
             
         # --- 主內容區塊的圖表顯示邏輯 ---
         if chart_option:
-            if chart_option == "產業市值長條圖（前 8 名 + 其他）":
-                st.subheader("🏭 各產業市值分佈")
+            # 修改這裡的條件，以匹配新的圖表名稱
+            if chart_option == "產業市值長條圖（前 8 名）":
+                st.subheader("🏭 各產業市值分佈 (前 8 名)") # 修改子標題
                 df_valid = df.dropna(subset=["Industry", "Market Capitalization"])
                 if not df_valid.empty:
                     industry_market = df_valid.groupby("Industry", as_index=False)["Market Capitalization"].sum()
                     industry_market = industry_market.sort_values("Market Capitalization", ascending=False)
 
                     top_n = 8
-                    top_industries = industry_market.head(top_n).copy() 
-                    other_sum = industry_market.iloc[top_n:]["Market Capitalization"].sum()
-                    
-                    if other_sum > 0:
-                        top_industries = pd.concat([
-                            top_industries,
-                            pd.DataFrame([{"Industry": "其他", "Market Capitalization": other_sum}])
-                        ])
+                    top_industries = industry_market.head(top_n) # 只取前 N 名，不包含「其他」
                     
                     fig = px.bar(top_industries,
                                  x="Industry", y="Market Capitalization",
-                                 title="前 8 名產業市值 + 其他",
+                                 title="前 8 名產業市值", # 修改圖表標題
                                  text_auto=True,
                                  labels={"Market Capitalization": "市值"})
                     st.plotly_chart(fig, use_container_width=True)
