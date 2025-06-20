@@ -6,22 +6,12 @@ import google.generativeai as genai
 import os
 
 # --- Gemini API Configuration ---
-# Load API key from Streamlit secrets
+# 從 Streamlit secrets 加載 API key
 if "GOOGLE_API_KEY" not in st.secrets:
-    st.error("Gemini API key not found in .streamlit/secrets.toml. Please add it.")
+    st.error("Gemini API key not found in .streamlit/secrets.toml. 請添加您的 API key。")
     st.stop()
 
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-
-# Initialize Gemini Pro model
-try:
-    gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-    # Initialize chat session for conversational AI
-    if "chat" not in st.session_state:
-        st.session_state.chat = gemini_model.start_chat(history=[])
-except Exception as e:
-    st.error(f"Failed to initialize Gemini model or chat: {e}")
-    st.stop()
 
 
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
@@ -33,24 +23,24 @@ st.markdown("---")
 
 uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV 檔案", type=["csv"])
 
-# Function to robustly convert columns to numeric
-@st.cache_data # Cache this function to avoid re-running on every interaction
+# 函數：將 DataFrame 欄位穩健地轉換為數值型
+@st.cache_data # 快取此函數，避免每次互動都重新運行
 def convert_df_to_numeric(df_input):
-    df_output = df_input.copy() # Work on a copy
+    df_output = df_input.copy() # 在副本上操作
     for col in df_output.columns:
         try:
             temp_series = pd.to_numeric(df_output[col], errors='coerce')
             original_non_null_count = df_output[col].count()
             converted_non_null_count = temp_series.count()
             
-            # Heuristic: if a significant portion (e.g., > 70%) converted to numeric, assume it's numeric
-            # And make sure it wasn't originally a purely object/boolean column unless it has actual numbers
+            # 啟發式判斷：如果大部分（例如 > 70%）數據能轉換為數值，則假定它是數值欄位
+            # 並確保它原本不是純粹的物件/布林欄位，除非它確實包含數字
             if original_non_null_count > 0 and converted_non_null_count / original_non_null_count > 0.7:
                 if not pd.api.types.is_bool_dtype(df_output[col]) and (pd.api.types.is_numeric_dtype(df_output[col]) or pd.api.types.is_object_dtype(df_output[col])):
                     df_output[col] = temp_series
                     df_output[col].replace([np.inf, -np.inf], np.nan, inplace=True)
         except Exception:
-            pass # Skip if conversion attempt fails for some unexpected reason
+            pass # 如果轉換失敗，則跳過
     return df_output
 
 if uploaded_file is not None:
@@ -60,7 +50,7 @@ if uploaded_file is not None:
 
         st.success("CSV 檔案上傳成功！正在處理數據...")
 
-        # Use the automatic numeric conversion function
+        # 使用自動數值轉換函數
         df = convert_df_to_numeric(df)
 
         # 確保必要的名稱欄位存在，且是字符串類型
@@ -72,6 +62,9 @@ if uploaded_file is not None:
             st.error("CSV 檔案中缺少 'Name' (或 'name') 欄位，無法進行公司層級分析。請確保數據包含公司名稱。")
             st.stop()
         
+        # 將處理後的 DataFrame 儲存到 session_state，供其他頁面（如 AI 聊天機器人）使用
+        st.session_state['processed_df'] = df
+
         # 預先計算可能用到的欄位
         if "Balance sheet total" in df.columns and "Debt" in df.columns and df["Balance sheet total"].sum() != 0:
             df["負債比率 (%)"] = (df["Debt"] / df["Balance sheet total"]) * 100
@@ -185,33 +178,7 @@ if uploaded_file is not None:
             chart_option = None
             st.sidebar.warning("當前上傳的檔案沒有足夠的數據來生成任何建議的圖表。")
             
-        # --- AI Chatbot Toggle ---
-        st.sidebar.markdown("---")
-        st.sidebar.header("💬 AI 聊天機器人")
-        enable_chatbot = st.sidebar.checkbox("啟用 AI 聊天機器人", key="enable_chatbot")
-
-        if enable_chatbot:
-            st.sidebar.write("有任何問題，儘管問我！")
-            
-            # Display chat history
-            for message in st.session_state.chat.history:
-                role = "user" if message.role == "user" else "assistant"
-                st.sidebar.text_area(f"{role.capitalize()}:", value=message.parts[0].text, height=70, disabled=True, key=f"chat_hist_{message.timestamp}")
-
-            user_query = st.sidebar.text_input("您的問題：", key="chatbot_input")
-
-            if user_query:
-                with st.spinner("AI 思考中..."):
-                    try:
-                        response = st.session_state.chat.send_message(user_query)
-                        st.sidebar.text_area("AI 回覆：", value=response.text, height=150, disabled=True, key=f"chat_resp_{response.timestamp}")
-                    except Exception as e:
-                        st.sidebar.error(f"聊天機器人錯誤: {e}")
-                # Clear the input box after sending
-                st.session_state.chatbot_input = "" # This might not immediately clear if the state isn't reset correctly on submit
-
-
-        # --- Main Content Area for Charts ---
+        # --- 主內容區塊的圖表顯示邏輯 ---
         if chart_option:
             if chart_option == "產業市值長條圖（前 8 名 + 其他）":
                 st.subheader("🏭 各產業市值分佈")
@@ -527,7 +494,7 @@ if uploaded_file is not None:
                     if "Return over 3years" in company_data and pd.notna(company_data["Return over 3years"]):
                         returns_data["3年回報率 (%)"] = company_data["Return over 3years"]
                     if "Return over 5years" in company_data and pd.notna(company_data["Return over 5years"]):
-                        returns_data["5年回報率 (%)"] = company_data["Return over 5years"] # Corrected to existing col
+                        returns_data["5年回報率 (%)"] = company_data["Return over 5years"]
                     
                     if returns_data:
                         returns_df = pd.DataFrame([
@@ -674,10 +641,9 @@ if uploaded_file is not None:
             st.markdown("---")
             st.header("🤖 AI 財務分析")
 
-            # Get the current selected company or default to the first available if any
+            # 獲取當前選定的公司，或者如果沒有選定則默認為第一家公司
             current_company_name = None
-            # Check if a company was selected from any of the single-company charts
-            # We need to check session_state or the current 'selected_company' local variable
+            # 檢查是否從任何單一公司圖表中選取了公司
             if 'asset_pie_company' in st.session_state and st.session_state.asset_pie_company:
                 current_company_name = st.session_state.asset_pie_company
             elif 'sales_trend_company' in st.session_state and st.session_state.sales_trend_company:
@@ -697,7 +663,7 @@ if uploaded_file is not None:
             elif 'holding_pie_company' in st.session_state and st.session_state.holding_pie_company:
                 current_company_name = st.session_state.holding_pie_company
             
-            # Fallback to the first company if no specific company was selected through a chart
+            # 如果沒有透過圖表選定特定公司，則回退到 DataFrame 中的第一家公司
             elif "Name" in df.columns and not df["Name"].dropna().empty:
                 current_company_name = df["Name"].dropna().unique().tolist()[0]
 
@@ -718,18 +684,19 @@ if uploaded_file is not None:
                 
                 如果提供的數據不足以進行全面分析，請明確指出哪些方面信息不足。
                 請避免使用過於技術性的術語，並以條列式或段落式清晰呈現。
+                請用繁體中文回答。
                 """
 
-                # Filter data for the selected company for AI analysis
+                # 篩選選定公司的數據以供 AI 分析
                 company_ai_data = df[df["Name"] == current_company_name].drop(columns=["Name"], errors='ignore').iloc[0].to_dict()
                 
-                # Convert numeric values to appropriate strings, handle NaN
+                # 將數值轉換為適當的字符串，處理 NaN 值
                 formatted_company_ai_data = {}
                 for k, v in company_ai_data.items():
                     if pd.isna(v):
                         formatted_company_ai_data[k] = "無數據"
                     elif isinstance(v, (int, float)):
-                        formatted_company_ai_data[k] = f"{v:,.2f}" # Format numbers with commas and 2 decimal places
+                        formatted_company_ai_data[k] = f"{v:,.2f}" # 格式化數字，帶千位分隔符和兩位小數
                     else:
                         formatted_company_ai_data[k] = str(v)
 
@@ -743,7 +710,8 @@ if uploaded_file is not None:
                 if st.button(f"生成 {current_company_name} 的 AI 財務分析報告"):
                     with st.spinner("AI 正在分析中，請稍候..."):
                         try:
-                            response = gemini_model.generate_content(ai_prompt)
+                            # 由於我們已經在頂部配置了 genai，直接調用模型即可
+                            response = genai.GenerativeModel('gemini-2.5-flash').generate_content(ai_prompt)
                             if response and response.text:
                                 st.subheader(f"✨ {current_company_name} 的 AI 財務分析報告")
                                 st.write(response.text)
