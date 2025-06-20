@@ -673,16 +673,13 @@ if uploaded_file is not None:
         with st.expander("📊 查看前 5 行資料"):
             st.dataframe(df.head())
 
-  # 將 Gemini AI Chat Section 移至側邊欄 (st.sidebar.XXX)
-        # =======================================================================
-        st.sidebar.markdown("---")
-        st.sidebar.header("🤖 AI 洞察分析 (Gemini)")
-        st.sidebar.info("您可以向 AI 提問關於上傳數據的問題，例如：\n- 『幫我分析一下銷售額和淨利潤的關係。』\n- 『市場市值最高的公司是哪家？它的主要財務指標是什麼？』\n- 『解釋一下流動比率的意義。』")
+        # --- Gemini AI Chat Section ---
+        st.markdown("---")
+        st.header("🤖 AI 洞察分析 (Gemini)")
+        st.info("您可以向 AI 提問關於上傳數據的問題，例如：\n- 『幫我分析一下銷售額和淨利潤的關係。』\n- 『市場市值最高的公司是哪家？它的主要財務指標是什麼？』\n- 『解釋一下流動比率的意義。』")
 
-        user_query = st.sidebar.text_input("💬 輸入您的問題：", key="gemini_query") # 這裡也改為 st.sidebar.text_input
+        user_query = st.text_input("💬 輸入您的問題：", key="gemini_query")
 
-        # AI 回應部分保持在主內容區或另行決定，這裡為了方便，假設它仍在主內容區顯示
-        # 如果你希望AI回應也顯示在側邊欄，那麼 st.markdown 和 st.write 也要改成 st.sidebar.markdown 和 st.sidebar.write
         if user_query:
             with st.spinner("AI 正在思考中..."):
                 try:
@@ -733,7 +730,7 @@ if uploaded_file is not None:
                         """
 
                     response = gemini_model.generate_content(prompt)
-                    st.markdown("#### 🤖 Gemini 的回應：") # AI 回應顯示在主內容區
+                    st.markdown("#### 🤖 Gemini 的回應：")
                     st.write(response.text)
 
                 except Exception as e:
@@ -748,4 +745,3 @@ else:
     st.info("⬆️ 請上傳一個財務資料 CSV 檔案以開始分析。")
 
 st.markdown("---")
-st.caption("© 2025 財務分析儀表板. 所有數據分析結果僅供參考。")
