@@ -3,25 +3,17 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 import os
-
-# --- Gemini API Configuration ---
-# 移除了對 Gemini API key 的檢查，因為 AI 助理已被移除。
-# 如果未來需要重新加入 AI 功能，請恢復此區塊。
-# if "GOOGLE_API_KEY" not in st.secrets:
-#     st.error("Gemini API key not found in .streamlit/secrets.toml. 請添加您的 API key。")
-#     st.stop()
-# genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-
+import io
 
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
 st.title("📊 企業財務洞察平台") # 更新標題，移除AI相關文字
 st.markdown("---")
-st.markdown(""" **請上傳您的 CSV 或 Excel 檔案**。 """) # 更新提示文字，明確指出支援Excel
+st.markdown(""" **請上傳您的 CSV 檔案**。 """) # 更新提示文字，明確指出只支援 CSV
 
 st.markdown("---")
 
-# Streamlit 檔案上傳器，現在支援 CSV 和 Excel
-uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV/Excel 檔案", type=["csv", "xlsx", "xls"])
+# Streamlit 檔案上傳器，現在只支援 CSV
+uploaded_file = st.file_uploader("� 上傳您的合併財務 CSV 檔案", type=["csv"])
 
 # 函數：將 DataFrame 欄位穩健地轉換為數值型
 @st.cache_data # 快取此函數，避免每次互動都重新運行
@@ -37,10 +29,15 @@ def convert_df_to_numeric(df_input):
             # 啟發式判斷：如果大部分（例如 > 70%）數據能轉換為數值，則假定它是數值欄位
             # 並確保它原本不是純粹的物件/布林欄位，除非它確實包含數字
             if original_non_null_count > 0 and converted_non_null_count / original_non_null_count > 0.7:
-                if not pd.api.types.is_bool_dtype(df_output[col]) and (pd.api.types.is_numeric_dtype(df_output[col]) or pd.api.types.is_object_dtype(df_output[col])):
+                # 檢查轉換後是否有足夠的非空數值
+                if temp_series.dropna().shape[0] > 0: # 確保有實際的數值數據
                     df_output[col] = temp_series
                     # 將無限值替換為 NaN，以避免繪圖或計算錯誤
                     df_output[col].replace([np.inf, -np.inf], np.nan, inplace=True)
+            elif original_non_null_count == 0 and pd.api.types.is_numeric_dtype(df_output[col]):
+                # 如果欄位是空的數值類型，也保持為數值，只是所有值為 NaN
+                df_output[col] = temp_series
+                df_output[col].replace([np.inf, -np.inf], np.nan, inplace=True)
         except Exception:
             # 如果轉換失敗，則跳過此欄位，保持其原始類型
             pass
@@ -48,13 +45,11 @@ def convert_df_to_numeric(df_input):
 
 if uploaded_file is not None:
     try:
-        # 根據檔案類型讀取數據
+        # 根據檔案類型讀取數據 (現在只讀取 CSV)
         if uploaded_file.name.lower().endswith('.csv'):
             df = pd.read_csv(uploaded_file)
-        elif uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file)
         else:
-            st.error("不支援的檔案格式。請上傳 CSV 或 Excel 檔案。")
+            st.error("不支援的檔案格式。請上傳 CSV 檔案。") # 更新錯誤訊息
             st.stop()
 
         df.columns = df.columns.str.strip() # 清理欄位名稱的空白字符
@@ -88,12 +83,14 @@ if uploaded_file is not None:
         st.session_state['processed_df'] = df
 
         # 預先計算可能用到的欄位 (確保原始欄位存在才計算)
-        if "Balance sheet total" in df.columns and "Debt" in df.columns and df["Balance sheet total"].sum() != 0:
-            df["負債比率 (%)"] = (df["Debt"] / df["Balance sheet total"]) * 100
+        if "Balance sheet total" in df.columns and "Debt" in df.columns:
+            # 避免除以零
+            df["負債比率 (%)"] = df.apply(lambda row: (row["Debt"] / row["Balance sheet total"]) * 100 if row["Balance sheet total"] != 0 else np.nan, axis=1)
             df["負債比率 (%)"].replace([np.inf, -np.inf], np.nan, inplace=True)
         else:
             df["負債比率 (%)"] = np.nan # 如果欄位不存在或總和為零，則為 NaN
         
+        # 總股東權益
         if all(col in df.columns for col in ["Equity capital", "Reserves", "Preference capital"]):
             df["總股東權益"] = df["Equity capital"] + df["Reserves"] + df["Preference capital"]
         elif "Balance sheet total" in df.columns and "Debt" in df.columns:
@@ -102,8 +99,9 @@ if uploaded_file is not None:
         else:
             df["總股東權益"] = np.nan
 
-        if "Current assets" in df.columns and "Current liabilities" in df.columns and df["Current liabilities"].sum() != 0:
-            df["流動比率"] = df["Current assets"] / df["Current liabilities"]
+        # 流動比率
+        if "Current assets" in df.columns and "Current liabilities" in df.columns:
+            df["流動比率"] = df.apply(lambda row: row["Current assets"] / row["Current liabilities"] if row["Current liabilities"] != 0 else np.nan, axis=1)
             df["流動比率"].replace([np.inf, -np.inf], np.nan, inplace=True)
         else:
             df["流動比率"] = np.nan
@@ -257,7 +255,7 @@ if uploaded_file is not None:
             sorted_available_charts = [c for c in generic_charts if c in available_charts] + \
                                       sorted([c for c in available_charts if c not in generic_charts])
             
-            chart_option = st.sidebar.selectbox("🔽 根據資料欄位選擇分析圖表：", sorted(available_charts)) # Changed to sorted(available_charts) to maintain alphabetical order within groups
+            chart_option = st.sidebar.selectbox("🔽 根據資料欄位選擇分析圖表：", sorted_available_charts)
             st.sidebar.markdown(f"**圖表說明:** {chart_requirements[chart_option]['description']}")
         else:
             chart_option = None
@@ -274,7 +272,6 @@ if uploaded_file is not None:
                 # 重新加入 df.info()
                 st.write("---") # 分隔線
                 st.write("資料集資訊：")
-                import io
                 buffer = io.StringIO()
                 df.info(buf=buffer, verbose=True, show_counts=True)
                 st.text(buffer.getvalue())
@@ -337,7 +334,13 @@ if uploaded_file is not None:
                 
                 if len(numeric_cols) >= 2:
                     col1 = st.selectbox("選擇 X 軸欄位：", sorted(numeric_cols), key="scatter_x_col")
-                    col2 = st.selectbox("選擇 Y 軸欄位：", sorted([c for c in numeric_cols if c != col1]), key="scatter_y_col")
+                    # 確保 Y 軸選項不包含 X 軸已選的欄位
+                    col2_options = sorted([c for c in numeric_cols if c != col1])
+                    if col2_options:
+                        col2 = st.selectbox("選擇 Y 軸欄位：", col2_options, key="scatter_y_col")
+                    else:
+                        st.warning("沒有足夠的數值欄位供 Y 軸選擇。")
+                        col2 = None
 
                     if col1 and col2:
                         df_valid = df.dropna(subset=[col1, col2])
@@ -524,7 +527,9 @@ if uploaded_file is not None:
                     if "Return on capital employed" in company_data and pd.notna(company_data["Return on capital employed"]):
                         metrics_data["資本運用報酬率 (ROCE)"] = company_data["Return on capital employed"]
                     
-                    metrics_df = pd.DataFrame(metrics_data.items(), columns=['指標', '數值']).dropna()
+                    metrics_df = pd.DataFrame(metrics_data.items(), columns=['指標', '數值'])
+                    metrics_df['數值'] = pd.to_numeric(metrics_df['數值'], errors='coerce') # 確保數值是數字
+                    metrics_df = metrics_df.dropna()
 
                     if not metrics_df.empty:
                         fig = px.bar(metrics_df, x='指標', y='數值',
@@ -617,26 +622,27 @@ if uploaded_file is not None:
                     selected_company = st.selectbox("請選擇公司", sorted(company_list), key="fcf_trend_company")
                     company_data = df[df["Name"] == selected_company].iloc[0]
 
-                    fcf_data = {}
-                    fcf_years_map = {
-                        "10年前": "Free cash flow 10years", "7年前": "Free cash flow 7years",
-                        "5年前": "Free cash flow 5years", "3年前": "Free cash flow 3years",
-                        "前年": "Free cash flow preceding year", "去年": "Free cash flow last year",
-                        "最新年度": "Free cash flow"
-                    }
-                    
-                    for year_label, col_name in fcf_years_map.items():
-                        if col_name in company_data and pd.notna(company_data[col_name]):
-                            fcf_data[year_label] = company_data[col_name]
+                    fcf_series = {}
+                    if "Free cash flow last year" in company_data and pd.notna(company_data["Free cash flow last year"]): fcf_series["去年"] = company_data["Free cash flow last year"]
+                    if "Free cash flow preceding year" in company_data and pd.notna(company_data["Free cash flow preceding year"]): fcf_series["前年"] = company_data["Free cash flow preceding year"]
+                    if "Free cash flow 3years" in company_data and pd.notna(company_data["Free cash flow 3years"]): fcf_series["過去 3 年平均"] = company_data["Free cash flow 3years"]
+                    if "Free cash flow 5years" in company_data and pd.notna(company_data["Free cash flow 5years"]): fcf_series["過去 5 年平均"] = company_data["Free cash flow 5years"]
+                    if "Free cash flow 7years" in company_data and pd.notna(company_data["Free cash flow 7years"]): fcf_series["過去 7 年平均"] = company_data["Free cash flow 7years"]
+                    if "Free cash flow 10years" in company_data and pd.notna(company_data["Free cash flow 10years"]): fcf_series["過去 10 年平均"] = company_data["Free cash flow 10years"]
 
-                    fcf_df = pd.DataFrame(fcf_data.items(), columns=['年度', '自由現金流']).dropna()
-                    
+                    fcf_df = pd.DataFrame(fcf_series.items(), columns=['年度/期間', '自由現金流']).dropna()
+
                     if not fcf_df.empty:
-                        year_order_keys = list(fcf_years_map.keys())
-                        fcf_df['年度_排序'] = fcf_df['年度'].apply(lambda x: year_order_keys.index(x))
-                        fcf_df = fcf_df.sort_values('年度_排序').drop(columns='年度_排序')
+                        # 定義一個明確的排序順序，因為 Plotly Express 不會自動識別“去年”、“前年”等
+                        order_map = {
+                            "去年": 0, "前年": 1, 
+                            "過去 3 年平均": 2, "過去 5 年平均": 3,
+                            "過去 7 年平均": 4, "過去 10 年平均": 5
+                        }
+                        fcf_df['sort_key'] = fcf_df['年度/期間'].map(order_map)
+                        fcf_df = fcf_df.sort_values('sort_key').drop(columns='sort_key')
 
-                        fig = px.line(fcf_df, x='年度', y='自由現金流',
+                        fig = px.line(fcf_df, x='年度/期間', y='自由現金流',
                                       title=f"{selected_company} 自由現金流趨勢",
                                       markers=True,
                                       labels={"自由現金流": "自由現金流"})
@@ -647,86 +653,64 @@ if uploaded_file is not None:
                     st.warning("沒有可供選擇的公司來繪製自由現金流趨勢圖。")
             
             elif chart_option == "股價相對表現趨勢圖（單一公司）":
-                st.subheader("📈 股價相對表現趨勢")
+                st.subheader("📈 股價相對表現")
                 company_list = df["Name"].dropna().unique().tolist()
                 if company_list:
-                    selected_company = st.selectbox("請選擇公司", sorted(company_list), key="price_trend_company")
+                    selected_company = st.selectbox("請選擇公司", sorted(company_list), key="price_perf_company")
                     company_data = df[df["Name"] == selected_company].iloc[0]
 
-                    returns_data = {}
-                    if "Current Price" in company_data and pd.notna(company_data["Current Price"]):
-                        returns_data["最新股價"] = company_data["Current Price"]
-                    if "t_1_price" in company_data and pd.notna(company_data["t_1_price"]):
-                        returns_data["前一個交易日價格"] = company_data["t_1_price"]
-                    if "Return over 1year" in company_data and pd.notna(company_data["Return over 1year"]):
-                        returns_data["1年回報率 (%)"] = company_data["Return over 1year"]
-                    if "Return over 3years" in company_data and pd.notna(company_data["Return over 3years"]):
-                        returns_data["3年回報率 (%)"] = company_data["Return over 3years"]
-                    if "Return over 5years" in company_data and pd.notna(company_data["Return over 5years"]):
-                        returns_data["5年回報率 (%)"] = company_data["Return over 5years"]
+                    price_metrics = {}
+                    if "Return over 1year" in company_data and pd.notna(company_data["Return over 1year"]): price_metrics["1年回報率"] = company_data["Return over 1year"]
+                    if "Return over 3years" in company_data and pd.notna(company_data["Return over 3years"]): price_metrics["3年回報率"] = company_data["Return over 3years"]
+                    if "Return over 5years" in company_data and pd.notna(company_data["Return over 5years"]): price_metrics["5年回報率"] = company_data["Return over 5years"]
+
+                    price_df = pd.DataFrame(price_metrics.items(), columns=['期間', '回報率']).dropna()
                     
-                    if returns_data:
-                        # 將股價和回報率分開處理，回報率適合條形圖
-                        price_metrics = {k: v for k, v in returns_data.items() if "股價" in k or "價格" in k}
-                        returns_metrics = {k: v for k, v in returns_data.items() if "回報率" in k}
-
-                        if price_metrics:
-                            st.markdown("##### 關鍵股價指標")
-                            for label, value in price_metrics.items():
-                                st.metric(label=f"{selected_company} {label}", value=f"{value:.2f}")
-
-                        if returns_metrics:
-                            returns_df = pd.DataFrame(returns_metrics.items(), columns=['期間', '數值']).dropna()
-                            if not returns_df.empty:
-                                fig = px.bar(returns_df, x='期間', y='數值',
-                                             title=f"{selected_company} 股價回報率 (%)",
-                                             text_auto=True,
-                                             labels={"數值": "回報率 (%)"})
-                                st.plotly_chart(fig, use_container_width=True)
-                            else:
-                                st.warning(f"公司 {selected_company} 沒有足夠的股價回報率數據來繪製圖表。")
-                        elif not price_metrics: # 如果連價格數據都沒有
-                            st.warning(f"公司 {selected_company} 沒有足夠的股價或回報率數據來繪製趨勢圖。")
+                    if not price_df.empty:
+                        # 可以進一步加入 Current Price vs t_1_price 的比較，如果需要更詳細的點對點趨勢
+                        # 但目前的設計更適合 bar chart 顯示不同期間的回報率
+                        fig = px.bar(price_df, x='期間', y='回報率',
+                                     title=f"{selected_company} 股價相對表現",
+                                     text_auto=True,
+                                     labels={"回報率": "回報率 (%)"})
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.warning(f"公司 {selected_company} 沒有足夠的股價或回報率數據來繪製趨勢圖。")
+                        st.warning(f"公司 {selected_company} 沒有足夠的股價回報數據來繪製。")
                 else:
-                    st.warning("沒有可供選擇的公司來繪製股價相對表現趨勢圖。")
+                    st.warning("沒有可供選擇的公司來繪製股價相對表現圖。")
 
             elif chart_option == "市值分佈直方圖":
-                st.subheader("📈 市值分佈")
+                st.subheader("📈 市值分佈直方圖")
                 df_valid = df.dropna(subset=["Market Capitalization"])
                 if not df_valid.empty:
                     fig = px.histogram(df_valid, x="Market Capitalization",
-                                       title="公司市值分佈",
+                                       title="市場資本化分佈",
                                        labels={"Market Capitalization": "市值"},
-                                       nbins=20)
+                                       nbins=30)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.warning("沒有足夠的『Market Capitalization』數據來繪製市值分佈直方圖。")
+                    st.warning("沒有足夠的『Market Capitalization』數據來繪製此圖。")
 
             elif chart_option == "銷售額與淨利潤關係散佈圖":
-                st.subheader("💹 銷售額與淨利潤關係")
+                st.subheader("📈 銷售額與淨利潤關係")
                 df_valid = df.dropna(subset=["Sales", "Net profit", "Name"])
                 if not df_valid.empty:
-                    fig = px.scatter(df_valid,
-                                     x="Sales", y="Net profit",
+                    fig = px.scatter(df_valid, x="Sales", y="Net profit",
                                      hover_name="Name",
-                                     title="公司銷售額與淨利潤的關係",
+                                     title="銷售額與淨利潤的關係",
                                      labels={"Sales": "銷售額", "Net profit": "淨利潤"},
-                                     color="Industry" if "Industry" in df.columns else None, # 如果有產業欄位，可以按產業區分顏色
-                                     size="Market Capitalization" if "Market Capitalization" in df.columns else None, # 以市值大小區分點大小
-                                     hover_data=["Industry", "Market Capitalization"] if "Industry" in df.columns and "Market Capitalization" in df.columns else None
-                                     )
+                                     color="Industry" if "Industry" in df_valid.columns else None,
+                                     trendline="ols" if len(df_valid) > 2 else None)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.warning("沒有足夠的『Sales』或『Net profit』數據來繪製此圖。")
 
             elif chart_option == "平均股東權益報酬率排名（前20）":
-                st.subheader("📊 平均股東權益報酬率排名 (前 20 名)")
+                st.subheader("🏆 平均股東權益報酬率排名 (前 20 名)")
                 df_valid = df.dropna(subset=["Name", "Average return on equity 5Years"])
                 if not df_valid.empty:
-                    top_roe = df_valid.sort_values("Average return on equity 5Years", ascending=False).head(20)
-                    fig = px.bar(top_roe,
+                    top_roe_avg = df_valid.sort_values("Average return on equity 5Years", ascending=False).head(20)
+                    fig = px.bar(top_roe_avg,
                                  x="Name", y="Average return on equity 5Years",
                                  title="平均股東權益報酬率 (5 年) 前 20 名公司",
                                  text_auto=True,
@@ -736,85 +720,67 @@ if uploaded_file is not None:
                     st.warning("沒有足夠的『Average return on equity 5Years』數據來進行排名。")
 
             elif chart_option == "發起人持股比例分佈（圓餅圖）":
-                st.subheader("🤝 發起人持股比例分佈")
+                st.subheader("📊 持股比例分佈")
                 
-                # 檢查是否有足夠的公司來選擇
-                company_list = df["Name"].dropna().unique().tolist()
-                
-                required_holding_cols = ["Promoter holding", "FII holding", "DII holding", "Public holding"]
+                # 判斷是顯示單一公司還是所有公司的平均
+                if "Promoter holding" in df.columns and "FII holding" in df.columns and \
+                   "DII holding" in df.columns and "Public holding" in df.columns:
+                    
+                    share_options = ["顯示所有公司平均持股", "選擇單一公司"]
+                    selected_share_option = st.selectbox("請選擇顯示方式：", share_options, key="share_holding_option")
 
-                # 過濾掉那些沒有完整持股數據的公司
-                df_with_holdings = df.dropna(subset=required_holding_cols, how='any')
-
-                if not df_with_holdings.empty:
-                    # 選項：平均或單一公司
-                    holding_view_option = st.radio(
-                        "選擇視圖方式：",
-                        ("所有公司平均", "單一公司"),
-                        key="holding_view_option"
-                    )
-
-                    plot_data = pd.DataFrame()
-                    chart_title = ""
-
-                    # 持股類型名稱映射
-                    type_map = {
-                        "Promoter holding": "發起人持股",
-                        "FII holding": "外資持股",
-                        "DII holding": "本土機構持股",
-                        "Public holding": "公眾持股"
-                    }
-
-                    if holding_view_option == "所有公司平均":
+                    if selected_share_option == "顯示所有公司平均持股":
                         # 計算平均持股比例
-                        avg_holdings = df_with_holdings[required_holding_cols].mean()
-                        plot_data = pd.DataFrame(avg_holdings).reset_index()
-                        plot_data.columns = ['持股類型', '比例']
-                        plot_data['持股類型'] = plot_data['持股類型'].map(type_map)
-                        chart_title = "所有公司平均持股比例分佈"
-                    else: # 單一公司
-                        # 確保選擇的公司有持股數據
-                        available_companies_for_holdings = df_with_holdings["Name"].dropna().unique().tolist()
-                        if available_companies_for_holdings:
-                            selected_company = st.selectbox(
-                                "請選擇公司", 
-                                sorted(available_companies_for_holdings), # 確保只顯示有持股數據的公司
-                                key="holding_company_select"
-                            )
-                            if selected_company:
-                                company_data = df_with_holdings[df_with_holdings["Name"] == selected_company].iloc[0]
-                                holdings = {col: company_data[col] for col in required_holding_cols}
-                                plot_data = pd.DataFrame(holdings.items(), columns=['持股類型', '比例'])
-                                plot_data['持股類型'] = plot_data['持股類型'].map(type_map)
-                                chart_title = f"{selected_company} 持股比例分佈"
-                            else:
-                                st.warning("請選擇一家公司以查看其持股比例分佈。")
-                        else:
-                            st.warning("沒有可供選擇的公司來繪製持股比例分佈圖 (數據不足)。")
-
-
-                    if not plot_data.empty:
-                        # 確保比例之和為 100，避免圓餅圖出錯
-                        total_percentage = plot_data['比例'].sum()
-                        # 僅在總和不為零時進行歸一化
-                        if total_percentage > 0:
-                            plot_data['比例'] = (plot_data['比例'] / total_percentage) * 100
-                        else:
-                            st.warning(f"選擇的公司/所有公司沒有有效的持股比例數據（總和為零或負數）。")
-                            plot_data = pd.DataFrame() # 清空資料，避免繪圖
+                        avg_holdings = df[["Promoter holding", "FII holding", "DII holding", "Public holding"]].mean().dropna()
                         
-                        if not plot_data.empty: # 再次檢查是否為空
-                            fig = px.pie(plot_data, 
-                                         values='比例', 
-                                         names='持股類型',
-                                         title=chart_title,
-                                         hole=0.3)
-                            st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("沒有足夠的發起人持股比例數據來繪製此圖。")
+                        if not avg_holdings.empty:
+                            holdings_df = pd.DataFrame(avg_holdings.items(), columns=['持股類型', '比例'])
+                            holdings_df['比例'] = pd.to_numeric(holdings_df['比例'], errors='coerce') # 確保是數值
+                            holdings_df = holdings_df.dropna()
+                            holdings_df = holdings_df[holdings_df['比例'] > 0] # 移除零值或負值
+
+                            if not holdings_df.empty:
+                                fig = px.pie(holdings_df, values='比例', names='持股類型',
+                                             title="所有公司平均持股比例分佈",
+                                             hole=0.3)
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning("沒有足夠的平均持股數據來繪製圓餅圖。")
+                        else:
+                            st.warning("沒有足夠的平均持股數據來繪製圓餅圖。")
+
+                    elif selected_share_option == "選擇單一公司":
+                        company_list = df["Name"].dropna().unique().tolist()
+                        if company_list:
+                            selected_company = st.selectbox("請選擇公司", sorted(company_list), key="share_holding_company")
+                            company_data = df[df["Name"] == selected_company].iloc[0]
+
+                            company_holdings = {
+                                "發起人持股": company_data.get("Promoter holding"),
+                                "FII 持股": company_data.get("FII holding"),
+                                "DII 持股": company_data.get("DII holding"),
+                                "公眾持股": company_data.get("Public holding")
+                            }
+                            
+                            holdings_df = pd.DataFrame(company_holdings.items(), columns=['持股類型', '比例'])
+                            holdings_df['比例'] = pd.to_numeric(holdings_df['比例'], errors='coerce') # 確保是數值
+                            holdings_df = holdings_df.dropna()
+                            holdings_df = holdings_df[holdings_df['比例'] > 0] # 移除零值或負值
+
+                            if not holdings_df.empty:
+                                fig = px.pie(holdings_df, values='比例', names='持股類型',
+                                             title=f"{selected_company} 持股比例分佈",
+                                             hole=0.3)
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning(f"公司 {selected_company} 沒有足夠的持股比例數據來繪製圓餅圖。")
+                        else:
+                            st.warning("沒有可供選擇的公司來繪製持股比例圖。")
                 else:
-                    st.warning("數據中沒有足夠的『Promoter holding』、『FII holding』、『DII holding』或『Public holding』數據來繪製此圖。")
+                    st.warning("缺少『Promoter holding』、『FII holding』、『DII holding』或『Public holding』等關鍵持股欄位來繪製此圖。")
 
     except Exception as e:
         st.error(f"處理檔案時發生錯誤：{e}")
-        st.info("請檢查您的 CSV/Excel 檔案格式是否正確，並包含所需的欄位。")
+        st.info("請檢查您的檔案格式和數據內容是否符合預期。")
+else:
+    st.info("請上傳您的財務數據檔案以開始分析。")
