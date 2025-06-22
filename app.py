@@ -2,26 +2,27 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-import google.generativeai as genai
+import google.generativeai as genai # 雖然移除了AI助理，但為了保持原來的import，暫時保留。如果用戶明確要求，可以移除。
 import os
 
 # --- Gemini API Configuration ---
-# 從 Streamlit secrets 加載 API key
-if "GOOGLE_API_KEY" not in st.secrets:
-    st.error("Gemini API key not found in .streamlit/secrets.toml. 請添加您的 API key。")
-    st.stop()
-
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+# 移除了對 Gemini API key 的檢查，因為 AI 助理已被移除。
+# 如果未來需要重新加入 AI 功能，請恢復此區塊。
+# if "GOOGLE_API_KEY" not in st.secrets:
+#     st.error("Gemini API key not found in .streamlit/secrets.toml. 請添加您的 API key。")
+#     st.stop()
+# genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
 
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
-st.title("📊 企業財務洞察與AI輔助決策平台")
+st.title("📊 企業財務洞察平台") # 更新標題，移除AI相關文字
 st.markdown("---")
-st.markdown(""" **請上傳CSV 檔案**。 """)
+st.markdown(""" **請上傳您的 CSV 或 Excel 檔案**。 """) # 更新提示文字，明確指出支援Excel
 
 st.markdown("---")
 
-uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV 檔案", type=["csv"])
+# Streamlit 檔案上傳器，現在支援 CSV 和 Excel
+uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV/Excel 檔案", type=["csv", "xlsx", "xls"])
 
 # 函數：將 DataFrame 欄位穩健地轉換為數值型
 @st.cache_data # 快取此函數，避免每次互動都重新運行
@@ -29,6 +30,7 @@ def convert_df_to_numeric(df_input):
     df_output = df_input.copy() # 在副本上操作
     for col in df_output.columns:
         try:
+            # 嘗試將欄位轉換為數值類型，無法轉換的設為 NaN
             temp_series = pd.to_numeric(df_output[col], errors='coerce')
             original_non_null_count = df_output[col].count()
             converted_non_null_count = temp_series.count()
@@ -38,34 +40,55 @@ def convert_df_to_numeric(df_input):
             if original_non_null_count > 0 and converted_non_null_count / original_non_null_count > 0.7:
                 if not pd.api.types.is_bool_dtype(df_output[col]) and (pd.api.types.is_numeric_dtype(df_output[col]) or pd.api.types.is_object_dtype(df_output[col])):
                     df_output[col] = temp_series
+                    # 將無限值替換為 NaN，以避免繪圖或計算錯誤
                     df_output[col].replace([np.inf, -np.inf], np.nan, inplace=True)
         except Exception:
-            pass # 如果轉換失敗，則跳過
+            # 如果轉換失敗，則跳過此欄位，保持其原始類型
+            pass
     return df_output
 
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip()
+        # 根據檔案類型讀取數據
+        if uploaded_file.name.lower().endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(uploaded_file)
+        else:
+            st.error("不支援的檔案格式。請上傳 CSV 或 Excel 檔案。")
+            st.stop()
 
-        st.success("CSV 檔案上傳成功！正在處理數據...")
+        df.columns = df.columns.str.strip() # 清理欄位名稱的空白字符
+
+        st.success("檔案上傳成功！正在處理數據...")
 
         # 使用自動數值轉換函數
         df = convert_df_to_numeric(df)
 
         # 確保必要的名稱欄位存在，且是字符串類型
+        # 嘗試尋找 'Name' 或 'name' 欄位作為公司名稱
         if 'Name' not in df.columns and 'name' in df.columns:
             df.rename(columns={'name': 'Name'}, inplace=True)
-        if 'Name' in df.columns:
-            df['Name'] = df['Name'].astype(str).str.strip()
-        else:
-            st.error("CSV 檔案中缺少 'Name' (或 'name') 欄位，無法進行公司層級分析。請確保數據包含公司名稱。")
-            st.stop()
         
-        # 將處理後的 DataFrame 儲存到 session_state，供其他頁面（如 AI 聊天機器人）使用
+        # 如果依然沒有 'Name' 欄位，嘗試尋找其他可能的公司名稱欄位，或設定一個預設
+        if 'Name' not in df.columns:
+            # 尋找包含 '公司', '企業', '名稱' 等關鍵字的欄位
+            potential_name_cols = [col for col in df.columns if any(keyword in col.lower() for keyword in ['公司', '企業', '名稱', 'entity', 'company'])]
+            if potential_name_cols:
+                df.rename(columns={potential_name_cols[0]: 'Name'}, inplace=True)
+                st.info(f"已將 '{potential_name_cols[0]}' 欄位識別為公司名稱 'Name'。")
+            else:
+                # 如果沒有找到，就創建一個索引作為名稱
+                df['Name'] = [f"公司_{i+1}" for i in range(len(df))]
+                st.warning("檔案中缺少 'Name' (或 'name') 欄位，已自動創建 '公司_X' 作為公司名稱。")
+        
+        # 確保 'Name' 欄位是字符串類型
+        df['Name'] = df['Name'].astype(str).str.strip()
+        
+        # 將處理後的 DataFrame 儲存到 session_state
         st.session_state['processed_df'] = df
 
-        # 預先計算可能用到的欄位
+        # 預先計算可能用到的欄位 (確保原始欄位存在才計算)
         if "Balance sheet total" in df.columns and "Debt" in df.columns and df["Balance sheet total"].sum() != 0:
             df["負債比率 (%)"] = (df["Debt"] / df["Balance sheet total"]) * 100
             df["負債比率 (%)"].replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -75,6 +98,7 @@ if uploaded_file is not None:
         if all(col in df.columns for col in ["Equity capital", "Reserves", "Preference capital"]):
             df["總股東權益"] = df["Equity capital"] + df["Reserves"] + df["Preference capital"]
         elif "Balance sheet total" in df.columns and "Debt" in df.columns:
+            # 如果沒有詳細股權資訊，則用資產總計減負債估算
             df["總股東權益"] = df["Balance sheet total"] - df["Debt"]
         else:
             df["總股東權益"] = np.nan
@@ -86,103 +110,255 @@ if uploaded_file is not None:
             df["流動比率"] = np.nan
 
         # ----------------------------------------------------
-        # 定義圖表需求 (基於欄位存在性)
+        # 定義圖表需求 (基於欄位存在性，以字典儲存，方便動態檢查)
+        # 移除了原先硬性定義的檔案名，現在完全基於當前上傳的df來判斷
+        # 新增了更通用的圖表類型，增加彈性
         # ----------------------------------------------------
         chart_requirements = {
-            "產業市值長條圖（前 8 名）": { # 修改這裡的名稱，移除「+ 其他」
+            "資料概覽表格": {
+                "required": set(), # 無需特定欄位，顯示前幾行
+                "description": "顯示所有數據，並可滑動查看，同時包含數據類型和描述性統計。", # 更新描述
+                "type": "table_overview"
+            },
+            "數值欄位分佈直方圖": {
+                "required": set(), # 需要至少一個數值欄位，但不指定名稱
+                "description": "選擇一個數值型欄位，顯示其數據分佈的直方圖。",
+                "type": "dynamic_numeric_hist"
+            },
+            "類別欄位計數長條圖": {
+                "required": set(), # 需要至少一個類別欄位，但不指定名稱
+                "description": "選擇一個類別型欄位，顯示各類別項目數量最多的前20名長條圖。",
+                "type": "dynamic_categorical_bar"
+            },
+            "任意兩數值欄位散佈圖": { # 新增的通用散佈圖
+                "required": set(), # 需要至少兩個數值欄位
+                "description": "選擇任意兩個數值型欄位，分析它們之間的關係。",
+                "type": "dynamic_scatter"
+            },
+            "產業市值長條圖（前 8 名）": {
                 "required": {"Industry", "Market Capitalization"},
-                "description": "展示各產業的總市值分佈。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "展示各產業的總市值分佈。",
+                "type": "bar"
             },
             "資產結構圓餅圖（單一公司）": {
                 "required": {"Name", "Net block", "Current assets", "Investments"},
-                "description": "顯示單一公司的淨固定資產、流動資產和投資在總資產中的佔比。數據來源：`Balance_Sheet_final.csv` 或已合併的數據。"
+                "description": "顯示單一公司的淨固定資產、流動資產和投資在總資產中的佔比。",
+                "type": "pie"
             },
             "負債 vs 營運資金（散佈圖）": {
                 "required": {"Debt", "Working capital", "Name"},
-                "description": "分析負債與營運資金之間的關係，並識別特定公司。數據來源：`Balance_Sheet_final.csv` 或已合併的數據。"
+                "description": "分析負債與營運資金之間的關係，並識別特定公司。",
+                "type": "scatter"
             },
             "財務比率表格": {
                 "required": {"Name", "負債比率 (%)", "流動比率", "總股東權益", "Balance sheet total"},
-                "description": "顯示計算後的關鍵財務比率和基本資產負債數據。數據來源：`Balance_Sheet_final.csv` 及計算所得。"
+                "description": "顯示計算後的關鍵財務比率和基本資產負債數據。",
+                "type": "table"
             },
             "各年度營收趨勢圖（單一公司）": {
                 "required": {"Name", "Sales", "Sales last year", "Sales preceding year"},
-                "description": "追蹤單一公司在過去三個會計年度的營收變化。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "追蹤單一公司在過去三個會計年度的營收變化。",
+                "type": "line"
             },
             "各年度淨利潤趨勢圖（單一公司）": {
                 "required": {"Name", "Profit after tax", "Profit after tax last year", "Profit after tax preceding year"},
-                "description": "追蹤單一公司在過去三個會計年度的淨利潤變化。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "追蹤單一公司在過去三個會計年度的淨利潤變化。",
+                "type": "line"
             },
             "各年度EPS趨勢圖（單一公司）": {
                 "required": {"Name", "EPS", "EPS last year", "EPS preceding year"},
-                "description": "追蹤單一公司在過去三個會計年度的每股盈餘 (EPS) 變化。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "追蹤單一公司在過去三個會計年度的每股盈餘 (EPS) 變化。",
+                "type": "line"
             },
             "ROE與ROCE比較圖（單一公司，最新年度）": {
                 "required": {"Name", "Return on equity", "Return on capital employed"},
-                "description": "比較單一公司最新年度的股東權益報酬率 (ROE) 和資本運用報酬率 (ROCE)。數據來源：`ratios_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "比較單一公司最新年度的股東權益報酬率 (ROE) 和資本運用報酬率 (ROCE)。",
+                "type": "bar"
             },
             "本益比與股東權益報酬率散佈圖": {
                 "required": {"Price to Earning", "Return on equity", "Name"},
-                "description": "分析所有公司在本益比和股東權益報酬率之間的關係，有助於投資者評估。數據來源：`ratios_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "分析所有公司在本益比和股東權益報酬率之間的關係，有助於投資者評估。",
+                "type": "scatter"
             },
             "銷售額成長率排名（前20）": {
                 "required": {"Name", "Sales growth 3Years"},
-                "description": "列出過去三年銷售額成長最快的前 20 家公司。數據來源：`Annual_P_L_2_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "列出過去三年銷售額成長最快的前 20 家公司。",
+                "type": "bar"
             },
             "利潤成長率排名（前20）": {
                 "required": {"Name", "Profit growth 3Years"},
-                "description": "列出過去三年利潤成長最快的前 20 家公司。數據來源：`Annual_P_L_2_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "列出過去三年利潤成長最快的前 20 家公司。",
+                "type": "bar"
             },
             "現金流量概覽圓餅圖（單一公司，最近一年）": {
                 "required": {"Name", "Cash from operations last year", "Cash from investing last year", "Cash from financing last year"},
-                "description": "展示單一公司最近一個會計年度的營運、投資和融資現金流分佈。數據來源：`cash_flow_statments_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "展示單一公司最近一個會計年度的營運、投資和融資現金流分佈。",
+                "type": "pie"
             },
             "自由現金流趨勢圖（單一公司）": {
                 "required": {"Name", "Free cash flow last year", "Free cash flow preceding year", "Free cash flow 3years", "Free cash flow 5years", "Free cash flow 7years", "Free cash flow 10years"},
-                "description": "追蹤單一公司過去多年的自由現金流趨勢。數據來源：`cash_flow_statments_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "追蹤單一公司過去多年的自由現金流趨勢。",
+                "type": "line"
             },
             "股價相對表現趨勢圖（單一公司）": {
                 "required": {"Name", "Current Price", "t_1_price", "Return over 1year", "Return over 3years", "Return over 5years"},
-                "description": "展示單一公司在不同時間段的股價回報率。數據來源：`price_final.csv`, `t1_prices.csv` 或已合併的數據。"
+                "description": "展示單一公司在不同時間段的股價回報率。",
+                "type": "bar" 
             },
             "市值分佈直方圖": {
                 "required": {"Market Capitalization"},
-                "description": "顯示市場資本化的分佈情況。數據來源：多個檔案中均有此欄位。"
+                "description": "顯示市場資本化的分佈情況。",
+                "type": "histogram"
             },
             "銷售額與淨利潤關係散佈圖": {
                 "required": {"Sales", "Net profit", "Name"},
-                "description": "分析公司銷售額與淨利潤之間的關係。數據來源：`Annual_P_L_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "分析公司銷售額與淨利潤之間的關係。",
+                "type": "scatter"
             },
             "平均股東權益報酬率排名（前20）": {
                 "required": {"Name", "Average return on equity 5Years"},
-                "description": "列出過去五年平均股東權益報酬率最高的前 20 家公司。數據來源：`ratios_2_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "列出過去五年平均股東權益報酬率最高的前 20 家公司。",
+                "type": "bar"
             },
             "發起人持股比例分佈（圓餅圖）": {
                 "required": {"Promoter holding", "FII holding", "DII holding", "Public holding"},
-                "description": "顯示所有公司平均或單一公司發起人、外資、本土機構和公眾持股比例。數據來源：`ratios_1_final.csv`, `cleaned_combined_data.csv` 或已合併的數據。"
+                "description": "顯示所有公司平均或單一公司發起人、外資、本土機構和公眾持股比例。",
+                "type": "pie"
             }
         }
 
-        # 只挑出能畫的圖
+        # 動態判斷可用的圖表
         available_charts = []
+        numeric_cols_df = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols_df = df.select_dtypes(include=['object', 'category']).columns.tolist()
+
         for chart_name, details in chart_requirements.items():
             required_cols = details["required"]
-            if required_cols.issubset(df.columns):
+            
+            # 對於動態分佈圖，只需要有數值或類別欄位即可
+            if details["type"] == "table_overview":
+                available_charts.append(chart_name) # 資料概覽始終可用
+            elif details["type"] == "dynamic_numeric_hist" and numeric_cols_df:
+                available_charts.append(chart_name)
+            elif details["type"] == "dynamic_categorical_bar" and categorical_cols_df:
+                available_charts.append(chart_name)
+            elif details["type"] == "dynamic_scatter" and len(numeric_cols_df) >= 2:
+                available_charts.append(chart_name)
+            elif required_cols.issubset(df.columns): # 對於其他特定欄位圖表
+                # 額外檢查關鍵欄位是否至少有非NaN值，避免繪製空圖
+                if all(df[col].dropna().empty for col in required_cols if col in df.columns):
+                    continue # 如果所有關鍵欄位都為空，則跳過此圖表
                 available_charts.append(chart_name)
 
         # --- Streamlit Sidebar for Chart Selection ---
         st.sidebar.header("📊 圖表選擇")
         if available_charts:
-            chart_option = st.sidebar.selectbox("🔽 根據資料欄位選擇分析圖表：", sorted(available_charts))
+            # 將通用圖表選項排在最前面
+            generic_charts = ["資料概覽表格", "數值欄位分佈直方圖", "類別欄位計數長條圖", "任意兩數值欄位散佈圖"]
+            sorted_available_charts = [c for c in generic_charts if c in available_charts] + \
+                                      sorted([c for c in available_charts if c not in generic_charts])
+            
+            chart_option = st.sidebar.selectbox("🔽 根據資料欄位選擇分析圖表：", sorted(available_charts)) # Changed to sorted(available_charts) to maintain alphabetical order within groups
+            st.sidebar.markdown(f"**圖表說明:** {chart_requirements[chart_option]['description']}")
         else:
             chart_option = None
             st.sidebar.warning("當前上傳的檔案沒有足夠的數據來生成任何建議的圖表。")
             
         # --- 主內容區塊的圖表顯示邏輯 ---
         if chart_option:
-            # 修改這裡的條件，以匹配新的圖表名稱
-            if chart_option == "產業市值長條圖（前 8 名）":
-                st.subheader("🏭 各產業市值分佈 (前 8 名)") # 修改子標題
+            # 顯示資料概覽
+            if chart_option == "資料概覽表格":
+                st.subheader("📚 資料集概覽")
+                st.write("這是您的資料集：")
+                st.dataframe(df) # 顯示整個 DataFrame，並可滑動
+
+                # 重新加入 df.info()
+                st.write("---") # 分隔線
+                st.write("資料集資訊：")
+                import io
+                buffer = io.StringIO()
+                df.info(buf=buffer, verbose=True, show_counts=True)
+                st.text(buffer.getvalue())
+                
+                # 重新加入描述性統計
+                st.write("---") # 分隔線
+                st.write("數值欄位的描述性統計：")
+                st.dataframe(df.describe().T)
+                
+                st.write("---") # 分隔線
+                st.write("類別欄位的描述性統計：")
+                st.dataframe(df.describe(include='object').T)
+
+            # 動態生成數值欄位直方圖
+            elif chart_option == "數值欄位分佈直方圖":
+                st.subheader("📈 數值欄位分佈直方圖")
+                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                if numeric_cols:
+                    selected_num_col = st.selectbox("請選擇一個數值欄位來繪製直方圖：", sorted(numeric_cols), key="dynamic_hist_col")
+                    if selected_num_col:
+                        df_valid = df.dropna(subset=[selected_num_col])
+                        if not df_valid.empty:
+                            fig = px.histogram(df_valid, x=selected_num_col,
+                                               title=f"{selected_num_col} 的分佈",
+                                               labels={selected_num_col: selected_num_col},
+                                               nbins=30)
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"欄位 '{selected_num_col}' 沒有足夠的非空數據來繪製直方圖。")
+                else:
+                    st.warning("資料集中沒有數值型欄位可供繪製直方圖。")
+
+            # 動態生成類別欄位計數長條圖
+            elif chart_option == "類別欄位計數長條圖":
+                st.subheader("📊 類別欄位計數長條圖")
+                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+                if categorical_cols:
+                    selected_cat_col = st.selectbox("請選擇一個類別欄位來繪製長條圖：", sorted(categorical_cols), key="dynamic_bar_col")
+                    if selected_cat_col:
+                        df_valid = df.dropna(subset=[selected_cat_col])
+                        if not df_valid.empty:
+                            # 取前20個最常見的類別，避免圖形過於擁擠
+                            top_categories = df_valid[selected_cat_col].value_counts().nlargest(20).index.tolist()
+                            plot_df = df_valid[df_valid[selected_cat_col].isin(top_categories)]
+
+                            fig = px.bar(plot_df, y=selected_cat_col, orientation='h',
+                                         title=f"{selected_cat_col} 的計數分佈 (前20)",
+                                         labels={selected_cat_col: selected_cat_col, "count": "計數"})
+                            fig.update_layout(yaxis={'categoryorder':'total ascending'}) # 讓數量多的在上方
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"欄位 '{selected_cat_col}' 沒有足夠的非空數據來繪製長條圖。")
+                else:
+                    st.warning("資料集中沒有類別型欄位可供繪製長條圖。")
+
+            # 新增的「任意兩數值欄位散佈圖」邏輯
+            elif chart_option == "任意兩數值欄位散佈圖":
+                st.subheader("📈 任意兩數值欄位散佈圖")
+                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                
+                if len(numeric_cols) >= 2:
+                    col1 = st.selectbox("選擇 X 軸欄位：", sorted(numeric_cols), key="scatter_x_col")
+                    col2 = st.selectbox("選擇 Y 軸欄位：", sorted([c for c in numeric_cols if c != col1]), key="scatter_y_col")
+
+                    if col1 and col2:
+                        df_valid = df.dropna(subset=[col1, col2])
+                        if not df_valid.empty:
+                            fig = px.scatter(df_valid, x=col1, y=col2,
+                                             title=f"{col1} vs {col2} 散佈圖",
+                                             labels={col1: col1, col2: col2},
+                                             hover_name="Name" if "Name" in df_valid.columns else None, # 如果有公司名稱欄位，顯示在懸停提示中
+                                             color="Industry" if "Industry" in df_valid.columns else None, # 如果有產業欄位，按產業區分顏色
+                                             trendline="ols" if len(df_valid) > 2 else None) # 如果數據點夠多，顯示趨勢線
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"所選欄位 '{col1}' 和 '{col2}' 沒有足夠的非空數據來繪製散佈圖。")
+                    else:
+                        st.warning("請選擇兩個不同的數值欄位來繪製散佈圖。")
+                else:
+                    st.warning("資料集中數值型欄位不足兩個，無法繪製散佈圖。")
+
+            elif chart_option == "產業市值長條圖（前 8 名）":
+                st.subheader("🏭 各產業市值分佈 (前 8 名)")
                 df_valid = df.dropna(subset=["Industry", "Market Capitalization"])
                 if not df_valid.empty:
                     industry_market = df_valid.groupby("Industry", as_index=False)["Market Capitalization"].sum()
@@ -193,7 +369,7 @@ if uploaded_file is not None:
                     
                     fig = px.bar(top_industries,
                                  x="Industry", y="Market Capitalization",
-                                 title="前 8 名產業市值", # 修改圖表標題
+                                 title="前 8 名產業市值",
                                  text_auto=True,
                                  labels={"Market Capitalization": "市值"})
                     st.plotly_chart(fig, use_container_width=True)
@@ -491,27 +667,27 @@ if uploaded_file is not None:
                         returns_data["5年回報率 (%)"] = company_data["Return over 5years"]
                     
                     if returns_data:
-                        returns_df = pd.DataFrame([
-                            {'期間': k, '數值': v} for k, v in returns_data.items()
-                        ]).dropna()
+                        # 將股價和回報率分開處理，回報率適合條形圖
+                        price_metrics = {k: v for k, v in returns_data.items() if "股價" in k or "價格" in k}
+                        returns_metrics = {k: v for k, v in returns_data.items() if "回報率" in k}
 
-                        if len(returns_df) <= 2 and "最新股價" in returns_data:
-                            st.metric(label=f"{selected_company} 當前股價", value=f"{returns_data['最新股價']:.2f}")
-                            if "前一個交易日價格" in returns_data:
-                                st.metric(label=f"{selected_company} 前一個交易日價格", value=f"{returns_data['前一個交易日價格']:.2f}")
-                            st.info("僅有少量股價數據，無法繪製有意義的趨勢圖。已顯示關鍵價格指標。")
-                        elif not returns_df.empty:
-                            returns_filtered_df = returns_df[returns_df['期間'].str.contains('回報率')]
-                            if not returns_filtered_df.empty:
-                                fig = px.bar(returns_filtered_df, x='期間', y='數值',
+                        if price_metrics:
+                            st.markdown("##### 關鍵股價指標")
+                            for label, value in price_metrics.items():
+                                st.metric(label=f"{selected_company} {label}", value=f"{value:.2f}")
+
+                        if returns_metrics:
+                            returns_df = pd.DataFrame(returns_metrics.items(), columns=['期間', '數值']).dropna()
+                            if not returns_df.empty:
+                                fig = px.bar(returns_df, x='期間', y='數值',
                                              title=f"{selected_company} 股價回報率 (%)",
                                              text_auto=True,
                                              labels={"數值": "回報率 (%)"})
                                 st.plotly_chart(fig, use_container_width=True)
                             else:
                                 st.warning(f"公司 {selected_company} 沒有足夠的股價回報率數據來繪製圖表。")
-                        else:
-                            st.warning(f"公司 {selected_company} 沒有足夠的股價數據來繪製趨勢圖。")
+                        elif not price_metrics: # 如果連價格數據都沒有
+                            st.warning(f"公司 {selected_company} 沒有足夠的股價或回報率數據來繪製趨勢圖。")
                     else:
                         st.warning(f"公司 {selected_company} 沒有足夠的股價或回報率數據來繪製趨勢圖。")
                 else:
@@ -566,7 +742,12 @@ if uploaded_file is not None:
                 # 檢查是否有足夠的公司來選擇
                 company_list = df["Name"].dropna().unique().tolist()
                 
-                if company_list:
+                required_holding_cols = ["Promoter holding", "FII holding", "DII holding", "Public holding"]
+
+                # 過濾掉那些沒有完整持股數據的公司
+                df_with_holdings = df.dropna(subset=required_holding_cols, how='any')
+
+                if not df_with_holdings.empty:
                     # 選項：平均或單一公司
                     holding_view_option = st.radio(
                         "選擇視圖方式：",
@@ -574,150 +755,67 @@ if uploaded_file is not None:
                         key="holding_view_option"
                     )
 
+                    plot_data = pd.DataFrame()
+                    chart_title = ""
+
+                    # 持股類型名稱映射
+                    type_map = {
+                        "Promoter holding": "發起人持股",
+                        "FII holding": "外資持股",
+                        "DII holding": "本土機構持股",
+                        "Public holding": "公眾持股"
+                    }
+
                     if holding_view_option == "所有公司平均":
                         # 計算平均持股比例
-                        avg_holdings = {}
-                        required_holding_cols = ["Promoter holding", "FII holding", "DII holding", "Public holding"]
-                        
-                        # 檢查所有必要欄位是否存在且非空
-                        can_plot_avg = True
-                        for col in required_holding_cols:
-                            if col not in df.columns or df[col].dropna().empty:
-                                can_plot_avg = False
-                                st.warning(f"缺少『{col}』數據或數據為空，無法計算所有公司平均持股比例。")
-                                break
-                        
-                        if can_plot_avg:
-                            avg_holdings["發起人持股"] = df["Promoter holding"].mean()
-                            avg_holdings["FII持股"] = df["FII holding"].mean()
-                            avg_holdings["DII持股"] = df["DII holding"].mean()
-                            avg_holdings["公眾持股"] = df["Public holding"].mean()
-
-                            plot_data = pd.DataFrame(avg_holdings.items(), columns=['持股類型', '比例']).dropna()
-                            plot_data = plot_data[plot_data['比例'] > 0] # 移除比例為零的項目
-
-                            if not plot_data.empty:
-                                fig = px.pie(plot_data, values='比例', names='持股類型',
-                                             title="所有公司平均持股比例分佈",
-                                             hole=0.3)
-                                st.plotly_chart(fig, use_container_width=True)
+                        avg_holdings = df_with_holdings[required_holding_cols].mean()
+                        plot_data = pd.DataFrame(avg_holdings).reset_index()
+                        plot_data.columns = ['持股類型', '比例']
+                        plot_data['持股類型'] = plot_data['持股類型'].map(type_map)
+                        chart_title = "所有公司平均持股比例分佈"
+                    else: # 單一公司
+                        # 確保選擇的公司有持股數據
+                        available_companies_for_holdings = df_with_holdings["Name"].dropna().unique().tolist()
+                        if available_companies_for_holdings:
+                            selected_company = st.selectbox(
+                                "請選擇公司", 
+                                sorted(available_companies_for_holdings), # 確保只顯示有持股數據的公司
+                                key="holding_company_select"
+                            )
+                            if selected_company:
+                                company_data = df_with_holdings[df_with_holdings["Name"] == selected_company].iloc[0]
+                                holdings = {col: company_data[col] for col in required_holding_cols}
+                                plot_data = pd.DataFrame(holdings.items(), columns=['持股類型', '比例'])
+                                plot_data['持股類型'] = plot_data['持股類型'].map(type_map)
+                                chart_title = f"{selected_company} 持股比例分佈"
                             else:
-                                st.warning("無法繪製平均持股比例圓餅圖，因為平均數據均為零或空。")
-                    
-                    elif holding_view_option == "單一公司":
-                        selected_company = st.selectbox("請選擇公司", sorted(company_list), key="holding_pie_company")
-                        company_data = df[df["Name"] == selected_company].iloc[0]
+                                st.warning("請選擇一家公司以查看其持股比例分佈。")
+                        else:
+                            st.warning("沒有可供選擇的公司來繪製持股比例分佈圖 (數據不足)。")
 
-                        holdings_data = {}
-                        if "Promoter holding" in company_data and pd.notna(company_data["Promoter holding"]):
-                            holdings_data["發起人持股"] = company_data["Promoter holding"]
-                        if "FII holding" in company_data and pd.notna(company_data["FII holding"]):
-                            holdings_data["FII持股"] = company_data["FII holding"]
-                        if "DII holding" in company_data and pd.notna(company_data["DII holding"]):
-                            holdings_data["DII持股"] = company_data["DII holding"]
-                        if "Public holding" in company_data and pd.notna(company_data["Public holding"]):
-                            holdings_data["公眾持股"] = company_data["Public holding"]
 
-                        plot_data = pd.DataFrame(holdings_data.items(), columns=['持股類型', '比例']).dropna()
-                        plot_data = plot_data[plot_data['比例'] > 0] # 移除比例為零的項目
-
-                        if not plot_data.empty:
-                            fig = px.pie(plot_data, values='比例', names='持股類型',
-                                         title=f"{selected_company} 持股比例分佈",
+                    if not plot_data.empty:
+                        # 確保比例之和為 100，避免圓餅圖出錯
+                        total_percentage = plot_data['比例'].sum()
+                        # 僅在總和不為零時進行歸一化
+                        if total_percentage > 0:
+                            plot_data['比例'] = (plot_data['比例'] / total_percentage) * 100
+                        else:
+                            st.warning(f"選擇的公司/所有公司沒有有效的持股比例數據（總和為零或負數）。")
+                            plot_data = pd.DataFrame() # 清空資料，避免繪圖
+                        
+                        if not plot_data.empty: # 再次檢查是否為空
+                            fig = px.pie(plot_data, 
+                                         values='比例', 
+                                         names='持股類型',
+                                         title=chart_title,
                                          hole=0.3)
                             st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.warning(f"公司 {selected_company} 沒有足夠的持股比例數據來繪製圓餅圖。")
-                else:
-                    st.warning("沒有可供選擇的公司或足夠的持股數據來繪製持股比例分佈圖。")
-
-            # --- AI 財務分析 ---
-            st.markdown("---")
-            st.header("🤖 AI 財務分析")
-
-            # 獲取當前選定的公司，或者如果沒有選定則默認為第一家公司
-            current_company_name = None
-            # 檢查是否從任何單一公司圖表中選取了公司
-            if 'asset_pie_company' in st.session_state and st.session_state.asset_pie_company:
-                current_company_name = st.session_state.asset_pie_company
-            elif 'sales_trend_company' in st.session_state and st.session_state.sales_trend_company:
-                current_company_name = st.session_state.sales_trend_company
-            elif 'profit_trend_company' in st.session_state and st.session_state.profit_trend_company:
-                current_company_name = st.session_state.profit_trend_company
-            elif 'eps_trend_company' in st.session_state and st.session_state.eps_trend_company:
-                current_company_name = st.session_state.eps_trend_company
-            elif 'roce_roe_company' in st.session_state and st.session_state.roce_roe_company:
-                current_company_name = st.session_state.roce_roe_company
-            elif 'cash_flow_pie_company' in st.session_state and st.session_state.cash_flow_pie_company:
-                current_company_name = st.session_state.cash_flow_pie_company
-            elif 'fcf_trend_company' in st.session_state and st.session_state.fcf_trend_company:
-                current_company_name = st.session_state.fcf_trend_company
-            elif 'price_trend_company' in st.session_state and st.session_state.price_trend_company:
-                current_company_name = st.session_state.price_trend_company
-            elif 'holding_pie_company' in st.session_state and st.session_state.holding_pie_company:
-                current_company_name = st.session_state.holding_pie_company
-            
-            # 如果沒有透過圖表選定特定公司，則回退到 DataFrame 中的第一家公司
-            elif "Name" in df.columns and not df["Name"].dropna().empty:
-                current_company_name = df["Name"].dropna().unique().tolist()[0]
-
-
-            if current_company_name:
-                ai_analysis_prompt_template = """
-                請根據以下公司 {company_name} 的財務數據，提供一份簡潔的財務分析報告。
-                
-                特別關注：
-                1. 公司的整體財務健康狀況 (例如：流動性、償債能力)。
-                2. 盈利能力表現。
-                3. 成長趨勢。
-                4. 任何值得注意的優勢或劣勢。
-                5. 對於數據中顯示的任何異常或亮點進行解釋。
-                
-                以下是 {company_name} 的財務數據 (請忽略 'Name' 欄位，它僅用於識別公司)：
-                {company_financial_data}
-                
-                如果提供的數據不足以進行全面分析，請明確指出哪些方面信息不足。
-                請避免使用過於技術性的術語，並以條列式或段落式清晰呈現。
-                請用繁體中文回答。
-                """
-
-                # 篩選選定公司的數據以供 AI 分析
-                company_ai_data = df[df["Name"] == current_company_name].drop(columns=["Name"], errors='ignore').iloc[0].to_dict()
-                
-                # 將數值轉換為適當的字符串，處理 NaN 值
-                formatted_company_ai_data = {}
-                for k, v in company_ai_data.items():
-                    if pd.isna(v):
-                        formatted_company_ai_data[k] = "無數據"
-                    elif isinstance(v, (int, float)):
-                        formatted_company_ai_data[k] = f"{v:,.2f}" # 格式化數字，帶千位分隔符和兩位小數
                     else:
-                        formatted_company_ai_data[k] = str(v)
+                        st.warning("沒有足夠的發起人持股比例數據來繪製此圖。")
+                else:
+                    st.warning("數據中沒有足夠的『Promoter holding』、『FII holding』、『DII holding』或『Public holding』數據來繪製此圖。")
 
-                company_financial_data_str = "\n".join([f"{k}: {v}" for k, v in formatted_company_ai_data.items()])
-                
-                ai_prompt = ai_analysis_prompt_template.format(
-                    company_name=current_company_name,
-                    company_financial_data=company_financial_data_str
-                )
-
-                if st.button(f"生成 {current_company_name} 的 AI 財務分析報告"):
-                    with st.spinner("AI 正在分析中，請稍候..."):
-                        try:
-                            # 由於我們已經在頂部配置了 genai，直接調用模型即可
-                            response = genai.GenerativeModel('gemini-2.5-flash').generate_content(ai_prompt)
-                            if response and response.text:
-                                st.subheader(f"✨ {current_company_name} 的 AI 財務分析報告")
-                                st.write(response.text)
-                            else:
-                                st.warning("AI 無法生成分析報告，請檢查數據或稍後再試。")
-                        except Exception as e:
-                            st.error(f"調用 AI 服務時發生錯誤: {e}")
-            else:
-                st.info("請先上傳包含公司名稱的數據，才能啟用 AI 財務分析。")
-            
     except Exception as e:
-        st.error(f"讀取或處理檔案時發生錯誤：{e}")
-        st.info("請確保您上傳的是有效的 CSV 檔案，並且數據格式符合預期。")
-else:
-    st.info("請上傳 CSV 檔案以開始分析。")
+        st.error(f"處理檔案時發生錯誤：{e}")
+        st.info("請檢查您的 CSV/Excel 檔案格式是否正確，並包含所需的欄位。")
