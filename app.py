@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-import google.generativeai as genai # 雖然移除了AI助理，但為了保持原來的import，暫時保留。如果用戶明確要求，可以移除。
 import os
 
 # --- Gemini API Configuration ---
