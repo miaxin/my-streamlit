@@ -9,29 +9,26 @@ st.set_page_config(page_title="簡易 CSV 資料分析器", layout="wide")
 st.title("📊 簡易 CSV 資料分析器")
 st.markdown("---")  # 分隔線
 
-# --- API Key 輸入（存到 session_state） ---
-st.write("### 🔑 請輸入您的 API Key")
+# --- 側邊欄：API Key 輸入 ---
+with st.sidebar:
+    st.header("🔑 API 設定")
 
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""  # 預設空值
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = ""  # 預設空值
 
-# 使用秘密輸入框
-user_api_key = st.text_input("輸入 API Key", type="password", value=st.session_state.api_key)
+    # API Key 輸入框（秘密輸入）
+    user_api_key = st.text_input("輸入 API Key", type="password", value=st.session_state.api_key)
 
-# 更新 session_state
-if user_api_key:
-    st.session_state.api_key = user_api_key
-    st.success("API Key 已輸入 ✅")
-else:
-    st.warning("請輸入 API Key 才能繼續使用此工具")
-
-# 🔘 清除 API Key 按鈕
-if st.session_state.api_key:
-    if st.button("🚪 登出 / 清除 API Key"):
-        st.session_state.api_key = ""
-        st.experimental_rerun()  # 重新整理頁面讓輸入框歸零
-
-st.markdown("---")  # 分隔線
+    # 更新 session_state
+    if user_api_key:
+        st.session_state.api_key = user_api_key
+        st.success("API Key 已輸入 ✅")
+        # 登出 / 清除 API Key 按鈕
+        if st.button("🚪 清除 API Key"):
+            st.session_state.api_key = ""
+            st.experimental_rerun()  # 重新整理頁面
+    else:
+        st.warning("請輸入 API Key")
 
 st.write("### 📤 上傳您的 CSV 檔案")
 
