@@ -13,16 +13,23 @@ st.markdown(""" **請上傳您的 CSV 檔案**。 """) # 更新提示文字，�
 st.markdown("---")
 
 
-# --- 側邊欄：API Key 輸入 ---
+# 側邊欄輸入 API Key
 st.sidebar.subheader("🔑 API Key 設定")
-api_key = st.sidebar.text_input("請輸入您的 API Key", type="password")
+if "api_key" not in st.session_state:
+    st.session_state["api_key"] = ""
 
-# 檢查 API Key 是否存在
-if not api_key:
+input_key = st.sidebar.text_input("請輸入您的 API Key", type="password", value=st.session_state["api_key"])
+
+# 每次輸入就更新 session_state
+if input_key:
+    st.session_state["api_key"] = input_key
+
+if not st.session_state["api_key"]:
     st.warning("⚠️ 請在左側欄輸入 API Key 以繼續使用系統。")
     st.stop()
 else:
     st.sidebar.success("✅ API Key 已輸入")
+
 
 # Streamlit 檔案上傳器，現在只支援 CSV
 uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV 檔案", type=["csv"])
