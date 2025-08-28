@@ -15,16 +15,16 @@ st.markdown("---")
 
 # 側邊欄輸入 API Key
 st.sidebar.subheader("🔑 API Key 設定")
-if "api_key" not in st.session_state:
-    st.session_state["api_key"] = ""
+if "GOOGLE_API_KEY" not in st.session_state:
+    st.session_state["GOOGLE_API_KEY"] = ""
 
 input_key = st.sidebar.text_input("請輸入您的 API Key", type="password", value=st.session_state["api_key"])
 
 # 每次輸入就更新 session_state
 if input_key:
-    st.session_state["api_key"] = input_key
+    st.session_state["aGOOGLE_API_KEY"] = input_key
 
-if not st.session_state["api_key"]:
+if not st.session_state["GOOGLE_API_KEY"]:
     st.warning("⚠️ 請在左側欄輸入 API Key 以繼續使用系統。")
     st.stop()
 else:
