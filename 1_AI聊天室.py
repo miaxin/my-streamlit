@@ -1,17 +1,17 @@
 # pages/2_💰_財務機器人.py
+import os
 import streamlit as st
 import google.generativeai as genai
-import os
 
 st.set_page_config(page_title="💰 財務機器人", layout="wide")
 st.title("💰 AI 財務聊天機器人")
 
-# --- 檢查 API Key ---
+# --- 檢查首頁是否有輸入 API Key ---
 if "GOOGLE_API_KEY" not in st.session_state or not st.session_state["GOOGLE_API_KEY"]:
     st.error("⚠️ 請先在首頁輸入 Gemini API Key 才能使用財務機器人")
     st.stop()
 
-# --- 設定環境變數 & 配置 Gemini SDK ---
+# --- 設定環境變數 & SDK ---
 os.environ["GOOGLE_API_KEY"] = st.session_state["GOOGLE_API_KEY"]
 genai.configure(api_key=st.session_state["GOOGLE_API_KEY"])
 
@@ -33,7 +33,7 @@ if user_input:
     # 存使用者訊息
     st.session_state.finance_chat_history.append({"role": "user", "content": user_input})
 
-    # 建立模型
+    # 建立 Gemini 模型
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     # 建立對話（含歷史）
