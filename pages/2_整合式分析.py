@@ -31,7 +31,7 @@ business_question = st.text_area(
 
 # --- 單次請求生成整合報告 ---
 def single_call_analysis(question: str):
-    prompt = f"""
+    prompt_text = f"""
 模擬一個由 CFO、COO、CEO 組成的專家團隊，針對以下商業問題生成完整整合報告：
 商業問題: {question}
 
@@ -42,15 +42,18 @@ def single_call_analysis(question: str):
 """
     # 使用 Gemini 模型
     model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt=prompt)
+    response = model.generate_content(contents=prompt)
     return response.text
 
-# --- 按鈕觸發 ---
-if st.button("生成整合報告") and business_question.strip():
-    with st.spinner("AI 專業經理人團隊正在進行全面分析..."):
-        try:
-            report = single_call_analysis(business_question)
-            st.success("📈 AI 專業經理人團隊整合報告完成！")
-            st.markdown(report)
-        except Exception as e:
-            st.error(f"❌ 發生錯誤：{e}")
+    messages = [
+        {"role": "system", "content": "你是高階企業分析專家。"},
+        {"role": "user", "content": prompt_text}
+    ]
+    
+    response = model.generate_content(messages=messages)
+    
+    # 回傳生成文字
+    return response.content[0].text
+
+
+
