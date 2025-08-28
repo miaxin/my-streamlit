@@ -6,11 +6,23 @@ import os
 import io
 
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
-st.title("📊 企業財務洞察平台") # 更新標題，移除AI相關文字
+st.title("📊 企業財務洞察平台") 
 st.markdown("---")
 st.markdown(""" **請上傳您的 CSV 檔案**。 """) # 更新提示文字，明確指出只支援 CSV
 
 st.markdown("---")
+
+
+# --- 側邊欄：API Key 輸入 ---
+st.sidebar.subheader("🔑 API Key 設定")
+api_key = st.sidebar.text_input("請輸入您的 API Key", type="password")
+
+# 檢查 API Key 是否存在
+if not api_key:
+    st.warning("⚠️ 請在左側欄輸入 API Key 以繼續使用系統。")
+    st.stop()
+else:
+    st.sidebar.success("✅ API Key 已輸入")
 
 # Streamlit 檔案上傳器，現在只支援 CSV
 uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV 檔案", type=["csv"])
