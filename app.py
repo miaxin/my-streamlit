@@ -5,34 +5,60 @@ import numpy as np
 import os
 import io
 
+# --- 頁面配置 ---
 st.set_page_config(page_title="財務分析儀表板", layout="wide")
-st.title("📊 企業財務洞察平台") 
-st.markdown("---")
-st.markdown(""" **請上傳您的 CSV 檔案**。 """) # 更新提示文字，明確指出只支援 CSV
-
+st.title("📊 企業財務洞察平台")
 st.markdown("---")
 
-
-# 側邊欄輸入 API Key
-st.sidebar.subheader("🔑 API Key 設定")
+# --- 側邊欄 API Key 設定 ---
 if "GOOGLE_API_KEY" not in st.session_state:
     st.session_state["GOOGLE_API_KEY"] = ""
 
-input_key = st.sidebar.text_input("請輸入您的 API Key", type="password", value=st.session_state["api_key"])
+input_key = st.sidebar.text_input(
+    "🔑 請輸入您的 API Key",
+    type="password",
+    value=st.session_state.get("GOOGLE_API_KEY", "")
+)
 
-# 每次輸入就更新 session_state
 if input_key:
-    st.session_state["aGOOGLE_API_KEY"] = input_key
+    st.session_state["GOOGLE_API_KEY"] = input_key
+    st.sidebar.success("✅ API Key 已儲存")
 
+# --- API Key 檢查 ---
 if not st.session_state["GOOGLE_API_KEY"]:
-    st.warning("⚠️ 請在左側欄輸入 API Key 以繼續使用系統。")
-    st.stop()
+    st.warning("⚠️ 請先在左側欄輸入 API Key，以使用 CSV 分析功能")
+    st.stop()  # 停止執行下面的程式
+
+# --- CSV 上傳 ---
+st.markdown("**請上傳您的 CSV 檔案**")
+uploaded_file = st.file_uploader("📤 上傳合併財務 CSV 檔案", type=["csv"])
+
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
+        st.success("✅ CSV 檔案上傳成功！")
+        st.dataframe(df.head())
+
+        # --- 基本圖表示範 ---
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        if numeric_cols:
+            st.markdown("### 財務指標圖表")
+            col1, col2 = st.columns(2)
+            with col1:
+                x_axis = st.selectbox("選擇 X 軸", numeric_cols, index=0)
+            with col2:
+                y_axis = st.selectbox("選擇 Y 軸", numeric_cols, index=1)
+
+            fig = px.scatter(df, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("CSV 中沒有數值欄位，無法生成圖表。")
+    except Exception as e:
+        st.error(f"❌ CSV 讀取失敗: {e}")
 else:
-    st.sidebar.success("✅ API Key 已輸入")
+    st.info("請上傳 CSV 檔案以進行分析")
 
 
-# Streamlit 檔案上傳器，現在只支援 CSV
-uploaded_file = st.file_uploader("📤 上傳您的合併財務 CSV 檔案", type=["csv"])
 
 # 函數：將 DataFrame 欄位穩健地轉換為數值型
 @st.cache_data # 快取此函數，避免每次互動都重新運行
