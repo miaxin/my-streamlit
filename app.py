@@ -35,39 +35,29 @@ uploaded_file = st.file_uploader("📤 上傳合併財務 CSV 檔案", type=["cs
 
 if uploaded_file:
     try:
-        # ✅ 只讀取一次 CSV
         df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip()  # 清理欄位名稱
         st.success("✅ CSV 檔案上傳成功！")
         st.dataframe(df.head())
 
-        # 使用自動數值轉換函數
-        df = convert_df_to_numeric(df)
+        # --- 基本圖表示範 ---
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        if numeric_cols:
+            st.markdown("### 財務指標圖表")
+            col1, col2 = st.columns(2)
+            with col1:
+                x_axis = st.selectbox("選擇 X 軸", numeric_cols, index=0)
+            with col2:
+                y_axis = st.selectbox("選擇 Y 軸", numeric_cols, index=1)
 
-        # 確保必要的名稱欄位存在
-        if 'Name' not in df.columns and 'name' in df.columns:
-            df.rename(columns={'name': 'Name'}, inplace=True)
-
-        if 'Name' not in df.columns:
-            potential_name_cols = [col for col in df.columns if any(keyword in col.lower() 
-                                    for keyword in ['公司', '企業', '名稱', 'entity', 'company'])]
-            if potential_name_cols:
-                df.rename(columns={potential_name_cols[0]: 'Name'}, inplace=True)
-                st.info(f"已將 '{potential_name_cols[0]}' 欄位識別為公司名稱 'Name'。")
-            else:
-                df['Name'] = [f"公司_{i+1}" for i in range(len(df))]
-                st.warning("檔案中缺少 'Name' (或 'name') 欄位，已自動創建 '公司_X' 作為公司名稱。")
-
-        df['Name'] = df['Name'].astype(str).str.strip()
-        st.session_state['processed_df'] = df
-
-        # 🔽 後面你的財務比率計算 / chart_requirements / 圖表邏輯 全部接著跑 🔽
-        # （不需要再重複讀檔了）
-        
+            fig = px.scatter(df, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("CSV 中沒有數值欄位，無法生成圖表。")
     except Exception as e:
         st.error(f"❌ CSV 讀取失敗: {e}")
 else:
     st.info("請上傳 CSV 檔案以進行分析")
+
 
 
 # 函數：將 DataFrame 欄位穩健地轉換為數值型
@@ -839,4 +829,3 @@ if uploaded_file is not None:
         st.info("請檢查您的檔案格式和數據內容是否符合預期。")
 else:
     st.info("請上傳您的財務數據檔案以開始分析。")
-
